@@ -10,6 +10,7 @@ import type { ReviewLog, ReviewRating, StudyList, TextRecord, VocabularyCard } f
 
 type Page = 'dashboard' | 'texts' | 'saved' | 'study' | 'review' | 'settings'
 type Theme = 'light' | 'dark' | 'system'
+type CardDirection = 'chinese-to-english' | 'english-to-chinese' | 'mixed'
 interface ReadingHistoryEntry { id: string; title: string; content: string; readAt: number; savedId?: string }
 const MASTERED_INTERVAL_DAYS = 21
 const NEAR_MASTERED_INTERVAL_DAYS = 7
@@ -23,6 +24,7 @@ const emptyCard = (textId: string): VocabularyCard => ({
 export function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('hanzi-study-theme') as Theme | null) ?? 'system')
+  const [cardDirection, setCardDirection] = useState<CardDirection>(() => (localStorage.getItem('hanzi-study-card-direction') as CardDirection | null) ?? 'mixed')
   const [reader, setReader] = useState<{ id: string; title: string; content: string; saved: boolean } | null>(null)
   const [history, setHistory] = useState<ReadingHistoryEntry[]>(() => {
     try { return JSON.parse(localStorage.getItem('hanzi-study-history') ?? '[]') as ReadingHistoryEntry[] } catch { return [] }
@@ -87,8 +89,8 @@ export function App() {
         {page === 'dashboard' && <DashboardPage texts={texts} cards={cards} reviewLogs={reviewLogs} dueCount={dueCards.length} onNavigate={navigate} />}
         {(page === 'texts' || page === 'saved') && <TextsPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} reader={reader} history={history} onOpenReader={openReader} onSaveReader={saveReaderText} onSetHistory={setHistory} />}
         {page === 'study' && <StudyPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} onReviewNow={() => navigate('review')} />}
-        {page === 'review' && <ReviewPage cards={dueCards} lists={lists} texts={texts} onRefresh={refresh} />}
-        {page === 'settings' && <SettingsPage onRefresh={refresh} theme={theme} onThemeChange={setTheme} />}
+        {page === 'review' && <ReviewPage cards={dueCards} lists={lists} texts={texts} onRefresh={refresh} cardDirection={cardDirection} />}
+        {page === 'settings' && <SettingsPage onRefresh={refresh} theme={theme} onThemeChange={setTheme} cardDirection={cardDirection} onCardDirectionChange={(direction) => { setCardDirection(direction); localStorage.setItem('hanzi-study-card-direction', direction) }} />}
       </main>
     </div>
   )
@@ -177,7 +179,7 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
   </section>
 }
 
-function SettingsPage({ onRefresh, theme, onThemeChange }: { onRefresh: () => Promise<void>; theme: Theme; onThemeChange: (theme: Theme) => void }) {
+function SettingsPage({ onRefresh, theme, onThemeChange, cardDirection, onCardDirectionChange }: { onRefresh: () => Promise<void>; theme: Theme; onThemeChange: (theme: Theme) => void; cardDirection: CardDirection; onCardDirectionChange: (direction: CardDirection) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [mode, setMode] = useState<ImportMode>('merge')
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
@@ -220,6 +222,18 @@ function SettingsPage({ onRefresh, theme, onThemeChange }: { onRefresh: () => Pr
         <select value={theme} onChange={(event) => onThemeChange(event.target.value as Theme)} aria-label="Theme">
           <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
         </select>
+      </div>
+      <div className="panel settings-card card-direction-settings">
+        <p className="eyebrow">REVIEW</p>
+        <h2>Card direction</h2>
+        <p className="muted">Choose which side of a card appears first during review.</p>
+        <div className="direction-options">
+          {([
+            ['chinese-to-english', 'Chinese → English', 'See the character, recall the meaning'],
+            ['english-to-chinese', 'English → Chinese', 'See the meaning, recall the character'],
+            ['mixed', 'Mixed', 'Random direction per card'],
+          ] as Array<[CardDirection, string, string]>).map(([value, title, description]) => <button key={value} type="button" className={`direction-option${cardDirection === value ? ' selected' : ''}`} onClick={() => onCardDirectionChange(value)} aria-pressed={cardDirection === value}><strong>{title}</strong><span>{description}</span></button>)}
+        </div>
       </div>
       <div className="panel settings-card">
         <p className="eyebrow">EXPORT</p>
@@ -628,7 +642,7 @@ function VocabularyRow({ card, lists, texts, generatedCardCount, editing, onEdit
 
 type ReviewFilter = 'all' | 'list' | 'source'
 
-function ReviewPage({ cards, lists, texts, onRefresh }: { cards: VocabularyCard[]; lists: StudyList[]; texts: TextRecord[]; onRefresh: () => Promise<void> }) {
+function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: VocabularyCard[]; lists: StudyList[]; texts: TextRecord[]; onRefresh: () => Promise<void>; cardDirection: CardDirection }) {
   const [filter, setFilter] = useState<ReviewFilter>('all')
   const [selectedListId, setSelectedListId] = useState('')
   const [selectedSourceId, setSelectedSourceId] = useState('')
@@ -659,12 +673,15 @@ function ReviewPage({ cards, lists, texts, onRefresh }: { cards: VocabularyCard[
   const pinyin = entry?.pinyin ?? ''
   const meanings = [...new Set((entry?.meaning ?? '').split(';').map((meaning) => getShortMeaning([meaning])).filter(Boolean))].slice(0, 2)
   const example = entry?.note?.trim()
+  const mixedDirection = [...card.id].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 2 === 0 ? 'chinese-to-english' : 'english-to-chinese'
+  const direction = cardDirection === 'mixed' ? mixedDirection : cardDirection
+  const frontContent = direction === 'english-to-chinese' ? (meanings.length ? meanings : ['No meaning available']) : [hanzi]
   const intervalFor = (rating: ReviewRating) => scheduleCard(card, rating, Date.now()).intervalDays
   const intervalLabel = (rating: ReviewRating) => {
     const days = intervalFor(rating)
     return days === 0 ? 'Now' : `${days} day${days === 1 ? '' : 's'}`
   }
-  return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} card{sessionCards.length === 1 ? '' : 's'} remaining in this session</div><div className={`review-card panel${revealed ? ' revealed' : ''}`}><div className="review-card-level">{entry?.hskLevel ? `HSK ${entry.hskLevel}` : 'HSK —'}</div><div className="review-prompt-area"><div className="prompt">{hanzi}</div></div>{revealed ? <div className="review-answer-area"><p className="review-pinyin">{pinyin || 'No pinyin available'}</p>{meanings.length ? <ol className="review-meanings">{meanings.map((meaning) => <li key={meaning}>{meaning}</li>)}</ol> : <p className="muted">No meaning available</p>}{example && <p className="review-example">{example}</p>}</div> : <button className="reveal" onClick={() => setRevealed(true)}>Reveal</button>}</div>{revealed && <><div className="rating-grid">{(['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => <button key={rating} className={`rating ${rating}`} onClick={() => rate(rating)}><strong>{rating[0].toUpperCase() + rating.slice(1)}</strong><small>{intervalLabel(rating)}</small></button>)}</div><button className="mark-known" onClick={() => void rate('easy')}>Mark as known, stop reviewing</button></>}</section>
+  return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} card{sessionCards.length === 1 ? '' : 's'} remaining in this session</div><div className={`review-card panel${revealed ? ' revealed' : ''}`}><div className="review-card-level">{entry?.hskLevel ? `HSK ${entry.hskLevel}` : 'HSK —'}</div><div className="review-prompt-area"><div className={`prompt${direction === 'english-to-chinese' ? ' prompt-meaning' : ''}`}>{frontContent.map((meaning, index) => <span key={meaning}>{index > 0 && <br />}{meaning}</span>)}</div></div>{revealed ? <div className="review-answer-area"><p className="review-pinyin">{pinyin || 'No pinyin available'}</p>{direction === 'english-to-chinese' && <p className="review-hanzi">{hanzi}</p>}{direction === 'chinese-to-english' && (meanings.length ? <ol className="review-meanings">{meanings.map((meaning) => <li key={meaning}>{meaning}</li>)}</ol> : <p className="muted">No meaning available</p>)}{example && <p className="review-example">{example}</p>}</div> : <button className="reveal" onClick={() => setRevealed(true)}>Reveal</button>}</div>{revealed && <><div className="rating-grid">{(['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => <button key={rating} className={`rating ${rating}`} onClick={() => rate(rating)}><strong>{rating[0].toUpperCase() + rating.slice(1)}</strong><small>{intervalLabel(rating)}</small></button>)}</div><button className="mark-known" onClick={() => void rate('easy')}>Mark as known, stop reviewing</button></>}</section>
 }
 
 function SectionHeading({ title, description }: { title: string; description: string }) { return <div className="section-heading"><div><p className="eyebrow">YOUR LIBRARY</p><h2>{title}</h2><p className="muted">{description}</p></div></div> }

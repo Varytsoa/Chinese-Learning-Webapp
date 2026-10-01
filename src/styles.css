@@ -109,6 +109,10 @@ textarea { resize: vertical; }
 .settings-card { display: grid; gap: 12px; padding: 20px; }
 .settings-card h2 { margin-top: -3px; }
 .settings-card input[type="file"] { border: 0; padding: 0; }
+.direction-options { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.direction-option { background: var(--surface); border: 1px solid var(--border-input); border-radius: 8px; color: var(--text); cursor: pointer; display: grid; gap: 6px; padding: 14px; text-align: left; }
+.direction-option span { color: var(--muted); font-size: .85rem; line-height: 1.35; }
+.direction-option.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .settings-status { border-radius: 7px; margin-top: 14px; padding: 11px 13px; }
 .settings-status.success { background: #edf3e9; color: #315f38; }
 .settings-status.error { background: #fbeeea; color: #a44835; }
@@ -122,10 +126,12 @@ textarea { resize: vertical; }
 .review-card-level { color: var(--accent-text); font-size: .78rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 .review-prompt-area { align-items: center; display: flex; justify-content: center; min-height: 170px; }
 .prompt { font-size: 3.3rem; margin: 25px 0 14px; }
+.prompt-meaning { font-size: 1.55rem; line-height: 1.35; max-width: 430px; }
 .review-card .reveal { width: 100%; }
 .review-card.revealed .review-prompt-area { border-bottom: 1px solid var(--border); min-height: 145px; }
 .review-answer-area { padding: 24px 0 8px; }
 .review-pinyin { color: var(--accent-text); font-size: 1.2rem; margin: 0 0 14px; }
+.review-hanzi { font-size: 2.25rem; font-weight: 750; margin: 0 0 14px; }
 .review-meanings { display: inline-block; margin: 0 auto 16px; padding-left: 22px; text-align: left; }
 .review-example { border-left: 3px solid var(--accent); margin: 12px auto 0; max-width: 480px; padding-left: 12px; text-align: left; }
 .reveal { background: var(--surface-soft); border: 1px solid var(--border-input); border-radius: 6px; color: var(--accent-text); padding: 13px 18px; }
@@ -137,7 +143,7 @@ textarea { resize: vertical; }
 .rating.again { color: #a44835; }.rating.easy { color: #315f38; }
 .mark-known { background: none; border: 0; color: var(--muted); cursor: pointer; display: block; margin: 14px auto 0; text-decoration: underline; }
 @media (max-width: 700px) { .reading-workspace { grid-template-columns: 1fr; } .reading-panel { border-bottom: 1px solid #ecece7; border-right: 0; padding-bottom: 17px; padding-right: 0; } .reader-toolbar { align-items: flex-start; flex-direction: column; } .reader-toolbar .primary { width: 100%; } }
-@media (max-width: 650px) { .topbar, .row, .toolbar, .card-row, .vocabulary-row { align-items: flex-start; flex-direction: column; } nav { width: 100%; } .nav-button { flex: 1; } .toolbar input { margin-left: 0; width: 100%; } .toolbar select, .toolbar .primary { width: 100%; } .list-tags { justify-content: flex-start; max-width: none; } .text-actions { flex-wrap: wrap; } .vocabulary-main { flex-direction: column; gap: 10px; } .row-tags { justify-content: flex-start; } .edit-fields { grid-template-columns: 1fr; } .settings-grid { grid-template-columns: 1fr; } .card-form { grid-template-columns: 1fr; } .card-form input:nth-child(3) { grid-column: auto; } .prompt { font-size: 2.6rem; } }
+@media (max-width: 650px) { .topbar, .row, .toolbar, .card-row, .vocabulary-row { align-items: flex-start; flex-direction: column; } nav { width: 100%; } .nav-button { flex: 1; } .toolbar input { margin-left: 0; width: 100%; } .toolbar select, .toolbar .primary { width: 100%; } .list-tags { justify-content: flex-start; max-width: none; } .text-actions { flex-wrap: wrap; } .vocabulary-main { flex-direction: column; gap: 10px; } .row-tags { justify-content: flex-start; } .edit-fields { grid-template-columns: 1fr; } .settings-grid { grid-template-columns: 1fr; } .direction-options { grid-template-columns: 1fr; } .card-form { grid-template-columns: 1fr; } .card-form input:nth-child(3) { grid-column: auto; } .prompt { font-size: 2.6rem; } .prompt-meaning { font-size: 1.3rem; } }
 
 :root {
   --page-bg: #f7f7f3;
