@@ -45,18 +45,7 @@ export function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('hanzi-study-theme', theme)
   }, [theme])
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
-      if (reader && !reader.saved && reader.content.trim()) {
-        event.preventDefault()
-        event.returnValue = ''
-      }
-    }
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [reader])
   const navigate = (nextPage: Page) => {
-    if (reader && !reader.saved && nextPage !== 'texts' && !window.confirm('Your unsaved text will be lost. Leave anyway?')) return
     setPage(nextPage)
   }
   const openReader = (next: { id: string; title: string; content: string; saved: boolean } | null) => {
@@ -140,7 +129,18 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
   const knownChars = new Set(vocabulary.filter((entry) => wordStatus(entry, cards) === 'known').flatMap((entry) => [...(entry.hanzi ?? entry.front)]))
   const reviewCounts = new Map<string, number>()
   reviewLogs.forEach((log) => reviewCounts.set(dayKey(log.reviewedAt), (reviewCounts.get(dayKey(log.reviewedAt)) ?? 0) + 1))
-  const activityDays = Array.from({ length: 183 }, (_, index) => { const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - (182 - index)); return date })
+  const currentMonday = new Date()
+  currentMonday.setHours(0, 0, 0, 0)
+  currentMonday.setDate(currentMonday.getDate() - ((currentMonday.getDay() + 6) % 7))
+  const activityWeeks = Array.from({ length: 26 }, (_, weekIndex) => Array.from({ length: 7 }, (_, dayIndex) => {
+    const date = new Date(currentMonday)
+    date.setDate(date.getDate() - (25 - weekIndex) * 7 + dayIndex)
+    return date
+  }))
+  const monthLabels = activityWeeks.map((week, index) => {
+    const monthStart = week.find((date) => date.getDate() === 1)
+    return monthStart ? { index, label: monthStart.toLocaleDateString(undefined, { month: 'short' }) } : null
+  })
   const toughest = [...vocabulary].sort((a, b) => {
     const lapses = (entry: VocabularyCard) => cards.filter((card) => card.vocabularyEntryId === entry.id).reduce((sum, card) => sum + card.lapses, 0)
     return lapses(b) - lapses(a)
@@ -161,7 +161,7 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
         <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY SAVED TEXTS</p><button className="link-button" onClick={() => onNavigate('texts')}>View all →</button></div>{texts.length ? <div className="saved-text-list">{texts.slice(0, 3).map((text) => <div className="saved-text-row" key={text.id}><strong>{text.title}</strong><span className="muted small">{new Date(text.createdAt).toLocaleDateString()}</span><span className="tag">{hardestTextLevel(text.content) ? `HSK ${hardestTextLevel(text.content)}` : 'Not in HSK'}</span></div>)}</div> : empty('Save a text to see it here.', 'texts')}</article>
       </div>
       <div className="dashboard-side">
-        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">STUDY ACTIVITY</p><span className="muted small">{reviewLogs.length} reviews · {new Set(reviewLogs.map((log) => dayKey(log.reviewedAt))).size} days</span></div><div className="heatmap-weekdays"><span>M</span><span>W</span><span>F</span></div><div className="heatmap">{activityDays.map((date) => <span key={date.toISOString()} title={`${date.toLocaleDateString()}: ${reviewCounts.get(dayKey(date.getTime())) ?? 0} reviews`} style={{ opacity: Math.min(1, .2 + (reviewCounts.get(dayKey(date.getTime())) ?? 0) / 10) }} />)}</div><div className="heatmap-legend"><span>Less</span><i /><i /><i /><i /><span>More</span></div></article>
+        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">STUDY ACTIVITY</p><span className="muted small">{reviewLogs.length} reviews · {new Set(reviewLogs.map((log) => dayKey(log.reviewedAt))).size} days</span></div><div className="heatmap-months">{monthLabels.map((month) => month && <span key={month.index} style={{ gridColumn: month.index + 1 }}>{month.label}</span>)}</div><div className="heatmap-layout"><div className="heatmap-weekdays"><span>Mon</span><span>Wed</span><span>Fri</span></div><div className="heatmap">{activityWeeks.map((week, weekIndex) => <div className="heatmap-week" key={weekIndex}>{week.map((date) => { const count = reviewCounts.get(dayKey(date.getTime())) ?? 0; return <span className={`heatmap-cell heatmap-level-${Math.min(4, count)}`} key={date.toISOString()} title={`${date.toLocaleDateString()}: ${count} reviews`} /> })}</div>)}</div></div><div className="heatmap-legend"><span>Less</span><i /><i /><i /><i /><span>More</span></div></article>
         <article className="dashboard-panel"><p className="dashboard-title">HSK PROGRESS</p><div className="hsk-progress-list">{hskRows.map((row) => <div className="hsk-progress-row" key={String(row.level)}><div><strong>HSK {row.level}</strong><span className="muted small">{row.studied} / {row.total || 0} · {row.total ? Math.round(row.studied / row.total * 100) : 0}%</span></div><div className="progress-track"><span style={{ width: `${row.total ? row.studied / row.total * 100 : 0}%` }} /><b style={{ width: `${row.total ? row.known / row.total * 100 : 0}%` }} /></div></div>)}</div></article>
       </div>
     </div>
@@ -268,8 +268,15 @@ function TextsPage({ texts, cards, lists, onRefresh, reader, history, onOpenRead
     const level = levels.sort((a, b) => hskRank(b) - hskRank(a))[0]
     return level ? `HSK ${level}` : 'Not in HSK'
   }
+  const deleteText = async (text: TextRecord) => {
+    if (!window.confirm(`Delete "${text.title}"?`)) return
+    await storage.deleteText(text.id)
+    await onRefresh()
+  }
+  const openSavedText = (text: TextRecord) => onOpenReader({ id: text.id, title: text.title, content: text.content, saved: true })
+  const wordCount = (content: string) => segmentChineseText(content).filter((segment) => segment.isWordLike).length
   return <section className="import-page">
-    {!reader && <><div className="import-heading"><div><h2>Import Text</h2><p className="muted">Turn any text, image or SRT into an interactive Chinese reader.</p></div><label className="upload-button">Upload <select onChange={() => uploadRef.current?.click()} aria-label="Upload text file"><option value="">Choose file</option><option value=".txt">.txt</option><option value=".srt">.srt</option><option value=".epub">.epub</option></select><input ref={uploadRef} hidden type="file" accept=".txt,.srt,.epub" onChange={upload} /></label></div><div className="import-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Paste Simplified or Traditional Chinese text here..." rows={12} /><div className="import-actions"><button className="primary import-read" onClick={read}>Read →</button><button className="quiet" onClick={() => setContent('这是一个中文阅读练习。欢迎来到汉字学习。')}>Try sample</button></div></div><div className="history-heading"><h3>Reading History</h3><button className="link-button" onClick={() => { onSetHistory([]); localStorage.removeItem('hanzi-study-history') }}>Clear history</button></div><div className="history-grid">{history.length ? history.map((item) => <article className="history-card" key={item.id} onClick={() => onOpenReader({ id: item.savedId ?? '', title: item.title, content: item.content, saved: Boolean(item.savedId) })}><button className="history-remove" aria-label="Remove from reading history" onClick={(event) => { event.stopPropagation(); removeHistory(item.id) }}>×</button><strong>{item.title}</strong><span className="tag">{badge(item.content)}</span><span className="muted small">{new Date(item.readAt).toLocaleDateString()} · {segmentChineseText(item.content).filter((segment) => segment.isWordLike).length} words</span><span className="muted small">{item.content.split(/\r?\n/)[0]}</span></article>) : <p className="muted">No reading history yet.</p>}</div></>}
+    {!reader && <><div className="import-heading"><div><h2>Import Text</h2><p className="muted">Turn any text, image or SRT into an interactive Chinese reader.</p></div><label className="upload-button">Upload <select onChange={() => uploadRef.current?.click()} aria-label="Upload text file"><option value="">Choose file</option><option value=".txt">.txt</option><option value=".srt">.srt</option><option value=".epub">.epub</option></select><input ref={uploadRef} hidden type="file" accept=".txt,.srt,.epub" onChange={upload} /></label></div><div className="import-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Paste Simplified or Traditional Chinese text here..." rows={12} /><div className="import-actions"><button className="primary import-read" onClick={read}>Read →</button><button className="quiet" onClick={() => setContent('这是一个中文阅读练习。欢迎来到汉字学习。')}>Try sample</button></div></div><div className="saved-texts-heading"><h3>Saved texts</h3></div><div className="saved-texts-grid">{texts.length ? texts.map((text) => <article className="saved-text-card" key={text.id} onClick={() => openSavedText(text)}><button className="saved-text-delete" aria-label={`Delete ${text.title}`} onClick={(event) => { event.stopPropagation(); void deleteText(text) }}>×</button><strong>{text.title}</strong><span className="tag">{badge(text.content)}</span><span className="muted small">{new Date(text.createdAt).toLocaleDateString()} · {wordCount(text.content)} words</span></article>) : <div className="dashboard-empty"><span>No saved texts yet.</span><button className="quiet" onClick={() => document.querySelector<HTMLTextAreaElement>('.import-box textarea')?.focus()}>Import your first text</button></div>}</div><div className="history-heading"><h3>Reading History</h3><button className="link-button" onClick={() => { onSetHistory([]); localStorage.removeItem('hanzi-study-history') }}>Clear history</button></div><div className="history-grid">{history.length ? history.map((item) => <article className="history-card" key={item.id} onClick={() => onOpenReader({ id: item.savedId ?? '', title: item.title, content: item.content, saved: Boolean(item.savedId) })}><button className="history-remove" aria-label="Remove from reading history" onClick={(event) => { event.stopPropagation(); removeHistory(item.id) }}>×</button><strong>{item.title}</strong><span className="tag">{badge(item.content)}</span><span className="muted small">{new Date(item.readAt).toLocaleDateString()} · {segmentChineseText(item.content).filter((segment) => segment.isWordLike).length} words</span><span className="muted small">{item.content.split(/\r?\n/)[0]}</span></article>) : <p className="muted">No reading history yet.</p>}</div></>}
     {reader && <><div className="reader-page-heading"><button className="quiet" onClick={() => onOpenReader(null)}>← Import another</button><span className="not-saved-badge">{reader.saved ? 'Saved' : 'Not saved'}</span></div><TextReader text={texts.find((item) => item.id === reader.id) ?? { id: reader.id, title: reader.title, content: reader.content, createdAt: 0 }} cards={cards} lists={lists} onRefresh={onRefresh} unsaved={!reader.saved} onSave={onSaveReader} /></>}
   </section>
 }
@@ -490,7 +497,7 @@ function TextReader({ text, cards, lists, onRefresh, unsaved = false, onSave }: 
     <div className="reading-workspace">
     <div className="reading-panel">
       <div className="reader-toolbar">
-        <button className="quiet" aria-label="Play audio">▶</button><details className="display-menu"><summary>Display</summary><label><input type="checkbox" checked={showPinyin} onChange={(event) => setDisplay('pinyin', event.target.checked, setShowPinyin)} />Pinyin</label><label><input type="checkbox" checked={showHskColors} onChange={(event) => setDisplay('hsk', event.target.checked, setShowHskColors)} />HSK colors</label><label><input type="checkbox" checked={showUnderlines} onChange={(event) => setDisplay('underlines', event.target.checked, setShowUnderlines)} />Study underlines</label><label><input type="checkbox" checked={showTranslations} onChange={(event) => setShowTranslations(event.target.checked)} />Translations</label><select value={fontSize} onChange={(event) => { setFontSize(event.target.value); localStorage.setItem('manda-display-font', event.target.value) }}><option value="small">Small font</option><option value="medium">Medium font</option><option value="large">Large font</option></select></details>
+        <details className="display-menu"><summary>Display</summary><label><input type="checkbox" checked={showPinyin} onChange={(event) => setDisplay('pinyin', event.target.checked, setShowPinyin)} />Pinyin</label><label><input type="checkbox" checked={showHskColors} onChange={(event) => setDisplay('hsk', event.target.checked, setShowHskColors)} />HSK colors</label><label><input type="checkbox" checked={showUnderlines} onChange={(event) => setDisplay('underlines', event.target.checked, setShowUnderlines)} />Study underlines</label><label><input type="checkbox" checked={showTranslations} onChange={(event) => setShowTranslations(event.target.checked)} />Translations</label><select value={fontSize} onChange={(event) => { setFontSize(event.target.value); localStorage.setItem('manda-display-font', event.target.value) }}><option value="small">Small font</option><option value="medium">Medium font</option><option value="large">Large font</option></select></details>
         <button className={text.id ? 'quiet' : 'primary'} onClick={() => onSave ? void onSave() : undefined}>{text.id ? 'Saved' : 'Save Text'}</button><div className="mark-menu"><button className="quiet" onClick={() => setShowMarkMenu((value) => !value)}>Mark Words</button>{showMarkMenu && <div className="mark-options"><button onClick={() => void markWords(false)}>Mark as studying</button><button onClick={() => void markWords(true)}>Mark as known</button></div>}</div>
         <button className="quiet" disabled={translating} onClick={translateAll}>{translating ? 'Translating…' : 'Translate'}</button>
       </div>
