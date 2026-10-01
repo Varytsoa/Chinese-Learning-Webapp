@@ -654,9 +654,17 @@ function ReviewPage({ cards, lists, texts, onRefresh }: { cards: VocabularyCard[
     setRevealed(false)
     await onRefresh()
   }
-  const reviewMeaning = getShortMeaning([card.cardType === 'recall' ? card.front : card.back.split(' · ').pop() ?? card.back])
-  const reviewAnswer = card.cardType === 'recognition' ? [card.back.split(' · ')[0], reviewMeaning].filter(Boolean).join(' · ') : reviewMeaning
-  return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} card{sessionCards.length === 1 ? '' : 's'} remaining in this session</div><div className="review-card panel"><p className="eyebrow">CURRENT CARD</p><div className="prompt">{card.cardType === 'recall' ? getShortMeaning([card.front]) : card.front}</div>{revealed ? <p className="answer">{card.cardType === 'recall' ? card.back : reviewAnswer}</p> : <button className="reveal" onClick={() => setRevealed(true)}>Show answer</button>}{revealed && <div className="rating-grid">{(['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => <button key={rating} className={`rating ${rating}`} onClick={() => rate(rating)}>{rating[0].toUpperCase() + rating.slice(1)}</button>)}</div>}</div></section>
+  const entry = card.vocabularyEntryId ? cards.find((item) => item.id === card.vocabularyEntryId) : card
+  const hanzi = entry?.hanzi ?? (card.cardType === 'recognition' ? card.front : '')
+  const pinyin = entry?.pinyin ?? ''
+  const meanings = [...new Set((entry?.meaning ?? '').split(';').map((meaning) => getShortMeaning([meaning])).filter(Boolean))].slice(0, 2)
+  const example = entry?.note?.trim()
+  const intervalFor = (rating: ReviewRating) => scheduleCard(card, rating, Date.now()).intervalDays
+  const intervalLabel = (rating: ReviewRating) => {
+    const days = intervalFor(rating)
+    return days === 0 ? 'Now' : `${days} day${days === 1 ? '' : 's'}`
+  }
+  return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} card{sessionCards.length === 1 ? '' : 's'} remaining in this session</div><div className={`review-card panel${revealed ? ' revealed' : ''}`}><div className="review-card-level">{entry?.hskLevel ? `HSK ${entry.hskLevel}` : 'HSK —'}</div><div className="review-prompt-area"><div className="prompt">{hanzi}</div></div>{revealed ? <div className="review-answer-area"><p className="review-pinyin">{pinyin || 'No pinyin available'}</p>{meanings.length ? <ol className="review-meanings">{meanings.map((meaning) => <li key={meaning}>{meaning}</li>)}</ol> : <p className="muted">No meaning available</p>}{example && <p className="review-example">{example}</p>}</div> : <button className="reveal" onClick={() => setRevealed(true)}>Reveal</button>}</div>{revealed && <><div className="rating-grid">{(['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => <button key={rating} className={`rating ${rating}`} onClick={() => rate(rating)}><strong>{rating[0].toUpperCase() + rating.slice(1)}</strong><small>{intervalLabel(rating)}</small></button>)}</div><button className="mark-known" onClick={() => void rate('easy')}>Mark as known, stop reviewing</button></>}</section>
 }
 
 function SectionHeading({ title, description }: { title: string; description: string }) { return <div className="section-heading"><div><p className="eyebrow">YOUR LIBRARY</p><h2>{title}</h2><p className="muted">{description}</p></div></div> }
