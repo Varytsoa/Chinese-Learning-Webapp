@@ -76,10 +76,6 @@ textarea { resize: vertical; }
 .reader-sidebar { background: #fbfbf8; padding: 18px; }
 .word-popup h2 { font-size: 1.45rem; margin-bottom: 5px; }
 .word-pinyin { color: #315f38; font-size: 1.05rem; margin-bottom: 12px; }
-.part-picker { border-top: 1px solid #e4e5df; display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; }
-.part-button { background: #fff; border: 1px solid #d7d9d0; border-radius: 6px; color: #315f38; padding: 8px 10px; text-align: left; }
-.part-button:hover { border-color: #315f38; }
-.part-button:disabled { color: #9b9f96; cursor: not-allowed; }
 .definitions { color: #535951; line-height: 1.55; margin: 0 0 18px; padding-left: 20px; }
 .list-picker { border-top: 1px solid #e4e5df; display: grid; gap: 7px; margin: 16px 0; padding-top: 13px; }
 .reader-sidebar .primary { margin-top: 16px; width: 100%; }
@@ -166,7 +162,7 @@ body, .app-shell { background: var(--page-bg); }
 .quick-read-header h2 { margin: 8px 0 3px; }
 .not-saved-badge { background: #fff1cc; border-radius: 999px; color: #795b00; font-size: .72rem; font-weight: 700; padding: 4px 8px; }
 .panel, .reader-sidebar { background: var(--surface); border-color: var(--border); }
-input, textarea, select, .part-button, .rating { background: var(--surface); border-color: var(--border-input); color: var(--text); }
+input, textarea, select, .rating { background: var(--surface); border-color: var(--border-input); color: var(--text); }
 .muted, .eyebrow, .reader-toggle, .review-filters label { color: var(--muted); }
 .toolbar, .reveal, .reader-word:hover, .reader-word:focus-visible { background: var(--surface-soft); }
 .text-card, .card-row, .vocabulary-item { background: var(--surface); }
@@ -258,7 +254,7 @@ html[data-theme="light"] { color-scheme: light; }
 body, .app-shell { background: var(--page-bg); color: var(--text); }
 .primary { background: var(--accent); }.primary:hover { background: #4f46e5; }.nav-button.active { background: var(--accent-soft); color: var(--accent); }
 .muted, .eyebrow, .reader-toggle { color: var(--muted); }.panel, .dashboard-panel, .reader-sidebar { background: var(--surface); border-color: var(--border); }
-input, textarea, select, .part-button, .rating { background: var(--surface); border-color: var(--border-input); color: var(--text); }
+input, textarea, select, .rating { background: var(--surface); border-color: var(--border-input); color: var(--text); }
 .reader-sidebar { background: var(--surface-muted); }.toolbar { background: var(--surface-soft); }.tag, .hsk-badge { background: var(--accent-soft); color: var(--accent); }
 .import-heading, .history-heading, .reader-page-heading { align-items: center; display: flex; justify-content: space-between; margin-bottom: 22px; }
 .import-heading h2 { font-size: 2rem; margin-bottom: 6px; }.upload-button { align-items: center; color: var(--accent); display: flex; font-weight: 650; gap: 6px; }.upload-button select { color: var(--accent); padding: 7px; }

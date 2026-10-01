@@ -438,19 +438,6 @@ function TextReader({ text, cards, lists, onRefresh, unsaved = false, onSave }: 
     }
   }
 
-  const addSelectedPart = async (part: HskPart) => {
-    if (!lookup) return
-    setBusy(true)
-    try {
-      const partLookup = await lookupWord(part.word)
-      await addVocabulary(part.word, partLookup, createCards)
-      await onRefresh()
-      setSelectedWord(null)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const addUnknownWords = async () => {
       const unknownWords = [...new Set(sentences.flatMap((sentence) => segmentChineseText(sentence)).filter((segment) => segment.isWordLike).map((segment) => segment.text))]
       .filter((word) => !knownWords.has(word))
@@ -512,7 +499,7 @@ function TextReader({ text, cards, lists, onRefresh, unsaved = false, onSave }: 
       {selectedWord && <div className="word-popup">
         <h2>{selectedWord}</h2>
         {loadingLookup && <p className="muted">Looking up definition…</p>}
-        {lookup && <><p className="word-pinyin">{lookup.pinyin}</p>{!lookup.found && <p className="definition-source">parts:</p>}<ul className="definitions">{lookup.definitions.length ? lookup.definitions.map((definition) => <li key={definition}>{definition}</li>) : <li>No CC-CEDICT definition found; pinyin is still available.</li>}</ul><p className="hsk-badge">{selectedAnalysis?.parts.some((part) => part.level) ? `HSK${getHskLevelForWord(selectedWord, hskMap)}` : 'Not in HSK'}</p>{selectedAnalysis && selectedAnalysis.parts.length > 1 && <div className="part-picker"><p className="muted small">Add a part or the whole word</p>{selectedAnalysis.parts.map((part, index) => <button className="part-button" key={`${part.word}-${index}`} disabled={busy || !part.level} onClick={() => addSelectedPart(part)}>{part.word} · {part.level ? `HSK${part.level}` : '?'}</button>)}</div>}<div className="list-picker"><p className="muted small">Custom lists</p>{lists.length ? lists.map((list) => <label className="check" key={list.id}><input type="checkbox" checked={selectedLists.includes(list.id)} onChange={() => toggleList(list.id)} />{list.name}</label>) : <p className="muted small">Create custom lists from Study List.</p>}</div><label className="check"><input type="checkbox" checked={createCards} onChange={(event) => setCreateCards(event.target.checked)} />Create flashcards</label><button className="primary" disabled={busy} onClick={addSelectedWord}>{busy ? 'Saving…' : knownWords.has(selectedWord) ? 'Update whole word in Study List' : 'Add whole word to Study List'}</button></>}
+        {lookup && <><p className="word-pinyin">{lookup.pinyin}</p>{!lookup.found && <p className="definition-source">parts:</p>}<ul className="definitions">{lookup.definitions.length ? lookup.definitions.map((definition) => <li key={definition}>{definition}</li>) : <li>No CC-CEDICT definition found; pinyin is still available.</li>}</ul><p className="hsk-badge">{selectedAnalysis?.parts.some((part) => part.level) ? `HSK${getHskLevelForWord(selectedWord, hskMap)}` : 'Not in HSK'}</p><div className="list-picker"><p className="muted small">Custom lists</p>{lists.length ? lists.map((list) => <label className="check" key={list.id}><input type="checkbox" checked={selectedLists.includes(list.id)} onChange={() => toggleList(list.id)} />{list.name}</label>) : <p className="muted small">Create custom lists from Study List.</p>}</div><label className="check"><input type="checkbox" checked={createCards} onChange={(event) => setCreateCards(event.target.checked)} />Create flashcards</label><button className="primary" disabled={busy} onClick={addSelectedWord}>{busy ? 'Saving…' : knownWords.has(selectedWord) ? 'Update word in Study List' : 'Add word to Study List'}</button></>}
       </div>}
     </aside>
     </div>
