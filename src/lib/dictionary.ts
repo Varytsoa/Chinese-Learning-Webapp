@@ -1,5 +1,5 @@
 import { pinyin } from 'pinyin-pro'
-import type { DictionaryEntry } from 'cc-cedict'
+import { getPrimarySenses, getRankedEntries } from './dictRank'
 
 export interface DictionaryLookup {
   hanzi: string
@@ -8,36 +8,15 @@ export interface DictionaryLookup {
   found: boolean
 }
 
-type Cedict = {
-  getBySimplified: (
-    word: string,
-    pinyin?: string | null,
-    options?: { asObject?: boolean; allowVariants?: boolean },
-  ) => Record<string, DictionaryEntry[]> | null
-}
-
-let cedictPromise: Promise<Cedict> | undefined
-
-async function loadDictionary(): Promise<Cedict> {
-  cedictPromise ??= import('cc-cedict').then(({ default: dictionary }) => dictionary as unknown as Cedict)
-  return cedictPromise
-}
-
 function pinyinFor(word: string): string {
   return pinyin(word, { toneType: 'symbol', type: 'string' })
 }
 
-function flattenDefinitions(result: Record<string, DictionaryEntry[]> | null): DictionaryEntry[] {
-  return result ? Object.values(result).flat() : []
-}
-
 export async function lookupWord(word: string): Promise<DictionaryLookup> {
-  const dictionary = await loadDictionary()
-  const fullEntries = flattenDefinitions(dictionary.getBySimplified(word, null, { asObject: true, allowVariants: true }))
-  const entries = fullEntries.length ? fullEntries : [...word].flatMap((character) =>
-        flattenDefinitions(dictionary.getBySimplified(character, null, { asObject: true, allowVariants: true })),
-      )
-  const definitions = [...new Set(entries.flatMap((entry) => entry.english))].slice(0, 8)
+  const fullEntries = await getRankedEntries(word, pinyinFor(word))
+  const definitions = fullEntries.length
+    ? (await getPrimarySenses(word, pinyinFor(word))).slice(0, 8)
+    : (await Promise.all([...word].map(async (character) => getPrimarySenses(character, pinyinFor(character))))).flat().slice(0, 8)
 
   return {
     hanzi: word,
