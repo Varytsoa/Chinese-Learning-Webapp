@@ -5,7 +5,7 @@ import type { VocabularyCard } from './types'
 export async function generateFlashcards(entry: VocabularyCard): Promise<VocabularyCard[]> {
   const hanzi = entry.hanzi?.trim() || entry.front.trim()
   const pinyin = entry.pinyin?.trim() || ''
-  const meaning = getShortMeaning([entry.meaning?.trim() || entry.back.trim()])
+  const meaning = await getShortMeaning(hanzi, [entry.meaning?.trim() || entry.back.trim()])
   const answerWithPinyin = [pinyin, meaning].filter(Boolean).join(' · ')
   const answerWithHanzi = [hanzi, pinyin].filter(Boolean).join(' · ')
   const now = Date.now()

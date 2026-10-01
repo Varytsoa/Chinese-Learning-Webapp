@@ -5,7 +5,8 @@ import { isDue, scheduleCard } from './lib/scheduler'
 import { generateFlashcards } from './flashcards'
 import { getPinyin, lookupWord, type DictionaryLookup } from './lib/dictionary'
 import { getShortMeaning } from './lib/shortMeaning'
-import { analyzeHskWord, getHskLevelForWord, getHskMap, hskRank, HSK_COLORS, type HskLevel, type HskPart } from './lib/hsk'
+import { analyzeHskWord, getHskLevelForWord, getHskMap, hskRank, HSK_COLORS, type HskLevel } from './lib/hsk'
+import { isDeferredSense } from './lib/dictRank'
 import type { ReviewLog, ReviewRating, StudyList, TextRecord, VocabularyCard } from './types'
 
 type Page = 'dashboard' | 'texts' | 'saved' | 'study' | 'review' | 'settings'
@@ -160,7 +161,7 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
       <div className="dashboard-main">
         <article className="dashboard-panel due-panel"><p className="dashboard-title">DUE FOR REVIEW</p><strong className="due-number">{dueCount}</strong><span className="muted">cards waiting</span><button className="primary" onClick={() => onNavigate('review')}>Flashcards</button></article>
         <div className="stat-tiles"><div className="dashboard-panel stat-tile"><strong>{streak}</strong><span className="muted">day streak</span></div><div className="dashboard-panel stat-tile"><strong>{reviewedToday.length}</strong><span className="muted">reviewed today</span></div><div className="dashboard-panel stat-tile"><strong>{reviewedToday.filter((log) => log.rating === 'good' || log.rating === 'easy').length}</strong><span className="muted">promoted today</span></div></div>
-        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY ADDED TO STUDY LIST</p><button className="link-button" onClick={() => onNavigate('study')}>View all →</button></div>{recentWords.length ? <div className="mini-card-grid">{recentWords.map((entry) => { const word = entry.hanzi ?? entry.front; const level = getHskLevelForWord(word, hskMap); return <div className="mini-word-card" key={entry.id}><strong style={{ color: level ? HSK_COLORS[level] : undefined }}>{word}</strong><span className="tag">{hskBadge(word)}</span><span className="word-pinyin">{entry.pinyin}</span><span className="muted small">{getShortMeaning([entry.meaning ?? entry.back])}</span></div> })}</div> : empty('No vocabulary added yet.', 'texts')}</article>
+        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY ADDED TO STUDY LIST</p><button className="link-button" onClick={() => onNavigate('study')}>View all →</button></div>{recentWords.length ? <div className="mini-card-grid">{recentWords.map((entry) => { const word = entry.hanzi ?? entry.front; const level = getHskLevelForWord(word, hskMap); return <div className="mini-word-card" key={entry.id}><strong style={{ color: level ? HSK_COLORS[level] : undefined }}>{word}</strong><span className="tag">{hskBadge(word)}</span><span className="word-pinyin">{entry.pinyin}</span><span className="muted small">{entry.meaning ?? entry.back}</span></div> })}</div> : empty('No vocabulary added yet.', 'texts')}</article>
         <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY SAVED TEXTS</p><button className="link-button" onClick={() => onNavigate('texts')}>View all →</button></div>{texts.length ? <div className="saved-text-list">{texts.slice(0, 3).map((text) => <div className="saved-text-row" key={text.id}><strong>{text.title}</strong><span className="muted small">{new Date(text.createdAt).toLocaleDateString()}</span><span className="tag">{hardestTextLevel(text.content) ? `HSK ${hardestTextLevel(text.content)}` : 'Not in HSK'}</span></div>)}</div> : empty('Save a text to see it here.', 'texts')}</article>
       </div>
       <div className="dashboard-side">
@@ -174,7 +175,7 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
     </div>
     <div className="dashboard-columns">
       <article className="dashboard-panel"><p className="dashboard-title">UNIQUE CHARACTERS</p><div className="large-stats"><span><strong className="green">{knownChars.size}</strong><small>known</small></span><span><strong>{chars.size - knownChars.size}</strong><small>studying</small></span><span><strong>{chars.size}</strong><small>total</small></span></div>{!knownChars.size && empty('Mark words as known through review.', 'review')}</article>
-      <article className="dashboard-panel"><p className="dashboard-title">YOUR TOUGHEST WORDS</p>{toughest.length ? <div className="toughest-grid">{toughest.map((entry) => <div className="mini-word-card" key={entry.id}><strong>{entry.hanzi ?? entry.front}</strong><span className="tag">{hskBadge(entry.hanzi ?? entry.front)}</span><span className="word-pinyin">{entry.pinyin}</span><span className="muted small">{getShortMeaning([entry.meaning ?? entry.back])}</span><b className="lapse-count">{cards.filter((card) => card.vocabularyEntryId === entry.id).reduce((sum, card) => sum + card.lapses, 0)} lapses</b></div>)}</div> : empty('Review cards to find your toughest words.', 'review')}</article>
+      <article className="dashboard-panel"><p className="dashboard-title">YOUR TOUGHEST WORDS</p>{toughest.length ? <div className="toughest-grid">{toughest.map((entry) => <div className="mini-word-card" key={entry.id}><strong>{entry.hanzi ?? entry.front}</strong><span className="tag">{hskBadge(entry.hanzi ?? entry.front)}</span><span className="word-pinyin">{entry.pinyin}</span><span className="muted small">{entry.meaning ?? entry.back}</span><b className="lapse-count">{cards.filter((card) => card.vocabularyEntryId === entry.id).reduce((sum, card) => sum + card.lapses, 0)} lapses</b></div>)}</div> : empty('Review cards to find your toughest words.', 'review')}</article>
     </div>
   </section>
 }
@@ -380,6 +381,12 @@ function TextReader({ text, cards, lists, onRefresh, unsaved = false, onSave }: 
   const knownWords = useMemo(() => new Set(vocabulary.map((card) => (card.hanzi ?? card.front).trim())), [vocabulary])
   const wordList = useMemo(() => [...new Set(sentences.flatMap((sentence) => segmentChineseText(sentence)).filter((segment) => segment.isWordLike).map((segment) => segment.text))], [sentences])
   const selectedAnalysis = useMemo(() => selectedWord ? analyzeHskWord(selectedWord, hskMap) : null, [selectedWord, hskMap])
+  const groupedEntries = useMemo(() => {
+    if (!lookup) return []
+    const groups = new Map<string, typeof lookup.entries>()
+    lookup.entries.forEach((entry) => groups.set(entry.pinyin, [...(groups.get(entry.pinyin) ?? []), entry]))
+    return [...groups.entries()]
+  }, [lookup])
   useEffect(() => { getHskMap().then(setHskMap) }, [])
   useEffect(() => { setTranslations(text.translations ?? {}) }, [text.id, text.translations])
 
@@ -428,7 +435,7 @@ function TextReader({ text, cards, lists, onRefresh, unsaved = false, onSave }: 
   }
 
   const addVocabulary = async (word: string, result: DictionaryLookup, withFlashcards: boolean) => {
-    const meaning = getShortMeaning(result.definitions) || 'No dictionary definition'
+    const meaning = (await getShortMeaning(word, result.definitions)) || 'No dictionary definition'
     const existing = await storage.findVocabularyDuplicate(word, text.id)
     const hskLevel = getHskLevelForWord(word, hskMap)
     const entry: VocabularyCard = existing
@@ -514,7 +521,7 @@ function TextReader({ text, cards, lists, onRefresh, unsaved = false, onSave }: 
       {selectedWord && <div className="word-popup">
         <h2>{selectedWord}</h2>
         {loadingLookup && <p className="muted">Looking up definition…</p>}
-        {lookup && <><p className="word-pinyin">{lookup.pinyin}</p>{!lookup.found && <p className="definition-source">parts:</p>}<ul className="definitions">{lookup.definitions.length ? lookup.definitions.map((definition) => <li key={definition}>{definition}</li>) : <li>No CC-CEDICT definition found; pinyin is still available.</li>}</ul><p className="hsk-badge">{selectedAnalysis?.parts.some((part) => part.level) ? `HSK${getHskLevelForWord(selectedWord, hskMap)}` : 'Not in HSK'}</p><div className="list-picker"><p className="muted small">Custom lists</p>{lists.length ? lists.map((list) => <label className="check" key={list.id}><input type="checkbox" checked={selectedLists.includes(list.id)} onChange={() => toggleList(list.id)} />{list.name}</label>) : <p className="muted small">Create custom lists from Study List.</p>}</div><label className="check"><input type="checkbox" checked={createCards} onChange={(event) => setCreateCards(event.target.checked)} />Create flashcards</label><button className="primary" disabled={busy} onClick={addSelectedWord}>{busy ? 'Saving…' : knownWords.has(selectedWord) ? 'Update word in Study List' : 'Add word to Study List'}</button></>}
+        {lookup && <><p className="word-pinyin">{lookup.pinyin}</p><p className="hsk-badge">{selectedAnalysis?.parts.some((part) => part.level) ? `HSK${getHskLevelForWord(selectedWord, hskMap)}` : 'Not in HSK'}</p>{groupedEntries.length ? <div className="dictionary-entries">{groupedEntries.map(([entryPinyin, entries]) => <section className="dictionary-entry" key={entryPinyin}><strong>{entryPinyin}</strong><ul className="definitions">{entries.flatMap((entry) => entry.english).map((sense, senseIndex) => <li className={isDeferredSense(sense) ? 'deferred-sense' : ''} key={`${sense}-${senseIndex}`}>{sense}</li>)}</ul></section>)}</div> : <ul className="definitions">{lookup.definitions.length ? lookup.definitions.map((definition) => <li key={definition}>{definition}</li>) : <li>No CC-CEDICT definition found; pinyin is still available.</li>}</ul>}<div className="list-picker"><p className="muted small">Custom lists</p>{lists.length ? lists.map((list) => <label className="check" key={list.id}><input type="checkbox" checked={selectedLists.includes(list.id)} onChange={() => toggleList(list.id)} />{list.name}</label>) : <p className="muted small">Create custom lists from Study List.</p>}</div><label className="check"><input type="checkbox" checked={createCards} onChange={(event) => setCreateCards(event.target.checked)} />Create flashcards</label><button className="primary" disabled={busy} onClick={addSelectedWord}>{busy ? 'Saving…' : knownWords.has(selectedWord) ? 'Update word in Study List' : 'Add word to Study List'}</button></>}
       </div>}
     </aside>
     </div>
@@ -541,19 +548,15 @@ function getStudyStatus(word: string, vocabulary: VocabularyCard[], cards: Vocab
 }
 
 function WordToken({ word, known, studyStatus, hskLevel, hskMap, showPinyin, showHskColors, showUnderlines, highlightAbove, onClick }: { word: string; known: boolean; studyStatus?: StudyStatus; hskLevel?: HskLevel; hskMap: Map<string, HskLevel>; showPinyin: boolean; showHskColors: boolean; showUnderlines: boolean; highlightAbove: number; onClick: () => void }) {
-  const [tooltip, setTooltip] = useState<{ full: DictionaryLookup; parts: Array<{ part: HskPart; lookup: DictionaryLookup }> } | null>(null)
+  const [tooltip, setTooltip] = useState<DictionaryLookup | null>(null)
   const [hovering, setHovering] = useState(false)
   const timer = useRef<number | undefined>(undefined)
   const qualifies = hskRank(hskLevel) > highlightAbove
-  const analysis = analyzeHskWord(word, hskMap)
   const className = ['reader-word', known ? 'known' : '', showUnderlines && studyStatus ? `study-${studyStatus}` : '', showHskColors && hskLevel && highlightAbove > 0 && !qualifies ? 'hsk-dimmed' : ''].filter(Boolean).join(' ')
   const startTooltip = () => {
     if (typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches) {
       timer.current = window.setTimeout(() => {
-        void lookupWord(word).then(async (full) => {
-          const parts = full.found ? [] : await Promise.all(analysis.parts.map(async (part) => ({ part, lookup: await lookupWord(part.word) })))
-          setTooltip({ full, parts })
-        })
+        void lookupWord(word).then(setTooltip)
       }, 150)
       setHovering(true)
     }
@@ -564,7 +567,7 @@ function WordToken({ word, known, studyStatus, hskLevel, hskMap, showPinyin, sho
     setHovering(false)
   }
   let characterIndex = 0
-  return <span className="reader-token" onMouseEnter={startTooltip} onMouseLeave={stopTooltip}><button className={className} onClick={onClick}><ruby>{[...word].map((character) => { const color = showHskColors && hskLevel && hskRank(hskLevel) > highlightAbove ? HSK_COLORS[hskLevel] : undefined; characterIndex += 1; return <span className="reader-character" style={{ color }} key={`${character}-${characterIndex}`}>{character}</span> })}{showPinyin && <rt>{getPinyin(word)}</rt>}</ruby></button>{hovering && tooltip && <span className="word-tooltip" role="tooltip"><strong>{word}</strong><span className="tooltip-pinyin">{tooltip.full.pinyin}</span><small>{hskLevel ? `HSK${hskLevel}` : 'Not in HSK'}</small><span>{tooltip.full.found ? tooltip.full.definitions.slice(0, 3).join('; ') || 'No definition' : `parts: ${tooltip.parts.map(({ part, lookup: partLookup }) => `${part.word} (${partLookup.definitions.slice(0, 3).join('; ') || 'No definition'})`).join(' · ')}`}</span></span>}</span>
+  return <span className="reader-token" onMouseEnter={startTooltip} onMouseLeave={stopTooltip}><button className={className} onClick={onClick}><ruby>{[...word].map((character) => { const color = showHskColors && hskLevel && hskRank(hskLevel) > highlightAbove ? HSK_COLORS[hskLevel] : undefined; characterIndex += 1; return <span className="reader-character" style={{ color }} key={`${character}-${characterIndex}`}>{character}</span> })}{showPinyin && <rt>{getPinyin(word)}</rt>}</ruby></button>{hovering && tooltip && <span className="word-tooltip" role="tooltip"><strong>{word}</strong><span className="tooltip-pinyin">{tooltip.pinyin}</span><small>{hskLevel ? `HSK${hskLevel}` : 'Not in HSK'}</small><span>{tooltip.definitions.slice(0, 3).join('; ') || 'No definition'}</span></span>}</span>
 }
 
 function ReaderLegend({ showHskColors, showUnderlines }: { showHskColors: boolean; showUnderlines: boolean }) {
@@ -635,9 +638,9 @@ function VocabularyRow({ card, lists, texts, generatedCardCount, editing, onEdit
   const source = texts.find((text) => text.id === card.textId)
   const [hanzi, setHanzi] = useState(card.hanzi ?? card.front)
   const [pinyin, setPinyin] = useState(card.pinyin ?? '')
-  const [meaning, setMeaning] = useState(getShortMeaning([card.meaning ?? card.back]))
-  if (editing) return <article className="panel vocabulary-row edit-row"><div className="edit-fields"><input value={hanzi} onChange={(e) => setHanzi(e.target.value)} aria-label="Hanzi" /><input value={pinyin} onChange={(e) => setPinyin(e.target.value)} aria-label="Pinyin" /><input value={meaning} onChange={(e) => setMeaning(e.target.value)} aria-label="Meaning" /></div><div className="row-actions"><button className="primary" onClick={() => { const shortMeaning = getShortMeaning([meaning]); return onSave({ hanzi, pinyin, meaning: shortMeaning, front: hanzi, back: shortMeaning }) }}>Save</button><button className="quiet" onClick={onEdit}>Cancel</button></div></article>
-  return <article className="panel vocabulary-row"><div className="vocabulary-main"><div><h2>{card.hanzi ?? card.front}</h2><p className="muted">{card.pinyin || 'No pinyin'} · {getShortMeaning([card.meaning ?? card.back])}</p><p className="muted small">From {source?.title ?? 'deleted text'} · {card.reps === 0 ? 'New' : `${card.reps} reviews`}</p></div><div className="row-tags">{card.hskLevel && <span className="tag">HSK {card.hskLevel}</span>}{card.listIds.map((listId) => <span className="tag" key={listId}>{lists.find((list) => list.id === listId)?.name ?? 'List'}</span>)}</div></div><div className="row-actions"><button className="quiet" onClick={onEdit}>Edit</button><button className="quiet" onClick={onGenerate}>{generatedCardCount > 0 ? 'Flashcards ready' : 'Generate Flashcards'}</button><button className="quiet" onClick={onReview}>Review Now</button></div></article>
+  const [meaning, setMeaning] = useState(card.meaning ?? card.back)
+  if (editing) return <article className="panel vocabulary-row edit-row"><div className="edit-fields"><input value={hanzi} onChange={(e) => setHanzi(e.target.value)} aria-label="Hanzi" /><input value={pinyin} onChange={(e) => setPinyin(e.target.value)} aria-label="Pinyin" /><input value={meaning} onChange={(e) => setMeaning(e.target.value)} aria-label="Meaning" /></div><div className="row-actions"><button className="primary" onClick={() => onSave({ hanzi, pinyin, meaning, front: hanzi, back: meaning })}>Save</button><button className="quiet" onClick={onEdit}>Cancel</button></div></article>
+  return <article className="panel vocabulary-row"><div className="vocabulary-main"><div><h2>{card.hanzi ?? card.front}</h2><p className="muted">{card.pinyin || 'No pinyin'} · {card.meaning ?? card.back}</p><p className="muted small">From {source?.title ?? 'deleted text'} · {card.reps === 0 ? 'New' : `${card.reps} reviews`}</p></div><div className="row-tags">{card.hskLevel && <span className="tag">HSK {card.hskLevel}</span>}{card.listIds.map((listId) => <span className="tag" key={listId}>{lists.find((list) => list.id === listId)?.name ?? 'List'}</span>)}</div></div><div className="row-actions"><button className="quiet" onClick={onEdit}>Edit</button><button className="quiet" onClick={onGenerate}>{generatedCardCount > 0 ? 'Flashcards ready' : 'Generate Flashcards'}</button><button className="quiet" onClick={onReview}>Review Now</button></div></article>
 }
 
 type ReviewFilter = 'all' | 'list' | 'source'
@@ -671,7 +674,7 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
   const entry = card.vocabularyEntryId ? cards.find((item) => item.id === card.vocabularyEntryId) : card
   const hanzi = entry?.hanzi ?? (card.cardType === 'recognition' ? card.front : '')
   const pinyin = entry?.pinyin ?? ''
-  const meanings = [...new Set((entry?.meaning ?? '').split(';').map((meaning) => getShortMeaning([meaning])).filter(Boolean))].slice(0, 2)
+  const meanings = [...new Set((entry?.meaning ?? '').split(';').map((meaning) => meaning.trim()).filter(Boolean))].slice(0, 2)
   const example = entry?.note?.trim()
   const mixedDirection = [...card.id].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 2 === 0 ? 'chinese-to-english' : 'english-to-chinese'
   const direction = cardDirection === 'mixed' ? mixedDirection : cardDirection

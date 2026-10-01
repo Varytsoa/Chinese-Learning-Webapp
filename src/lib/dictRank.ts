@@ -21,6 +21,10 @@ const deferredSenseMarkers = [
   'taiwan pr.',
 ]
 
+export function isDeferredSense(sense: string): boolean {
+  return deferredSenseMarkers.some((marker) => sense.toLowerCase().includes(marker))
+}
+
 let dictionaryPromise: Promise<Cedict> | undefined
 let hskPinyinPromise: Promise<Map<string, string>> | undefined
 
@@ -77,7 +81,7 @@ function normalizePinyin(value: string): string {
 
 function reorderSenses(senses: string[]): string[] {
   return senses
-    .map((sense, index) => ({ sense, index, deferred: deferredSenseMarkers.some((marker) => sense.toLowerCase().includes(marker)) }))
+    .map((sense, index) => ({ sense, index, deferred: isDeferredSense(sense) }))
     .sort((left, right) => Number(left.deferred) - Number(right.deferred) || left.index - right.index)
     .map(({ sense }) => sense)
 }
@@ -88,7 +92,7 @@ function entryPinyin(entry: DictionaryEntry): string {
 
 function entryIsDeferred(entry: DictionaryEntry): boolean {
   if (!entry.english.length) return false
-  const deferredCount = entry.english.filter((sense) => deferredSenseMarkers.some((marker) => sense.toLowerCase().includes(marker))).length
+  const deferredCount = entry.english.filter(isDeferredSense).length
   return deferredCount > entry.english.length / 2
 }
 
@@ -124,5 +128,5 @@ export async function getPrimarySenses(word: string, contextPinyin?: string): Pr
   const entries = await getRankedEntries(word, contextPinyin)
   const best = entries[0]
   if (!best) return []
-  return best.english.filter((sense) => !deferredSenseMarkers.some((marker) => sense.toLowerCase().includes(marker)))
+  return best.english.filter((sense) => !isDeferredSense(sense))
 }

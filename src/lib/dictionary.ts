@@ -1,10 +1,12 @@
 import { pinyin } from 'pinyin-pro'
+import type { DictionaryEntry } from 'cc-cedict'
 import { getPrimarySenses, getRankedEntries } from './dictRank'
 
 export interface DictionaryLookup {
   hanzi: string
   pinyin: string
   definitions: string[]
+  entries: DictionaryEntry[]
   found: boolean
 }
 
@@ -20,8 +22,9 @@ export async function lookupWord(word: string): Promise<DictionaryLookup> {
 
   return {
     hanzi: word,
-    pinyin: pinyinFor(word),
+    pinyin: fullEntries[0]?.pinyin ?? pinyinFor(word),
     definitions,
+    entries: fullEntries,
     found: fullEntries.length > 0,
   }
 }
