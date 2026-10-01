@@ -7,7 +7,7 @@ import { getPinyin, lookupWord, type DictionaryLookup } from './lib/dictionary'
 import { analyzeHskWord, getHskLevelForWord, getHskMap, hskRank, HSK_COLORS, type HskLevel, type HskPart } from './lib/hsk'
 import type { ReviewLog, ReviewRating, StudyList, TextRecord, VocabularyCard } from './types'
 
-type Page = 'dashboard' | 'texts' | 'study' | 'review' | 'settings'
+type Page = 'dashboard' | 'texts' | 'saved' | 'study' | 'review' | 'settings'
 type Theme = 'light' | 'dark' | 'system'
 interface ReadingHistoryEntry { id: string; title: string; content: string; readAt: number; savedId?: string }
 const MASTERED_INTERVAL_DAYS = 21
@@ -78,13 +78,13 @@ export function App() {
       <aside className="sidebar">
         <div className="sidebar-brand"><p className="eyebrow">PERSONAL STUDY SPACE</p><h1>Hanzi Study</h1></div>
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {(['dashboard', 'texts', 'study', 'review', 'settings'] as Page[]).map((item) => <button key={item} className={page === item ? 'nav-button active' : 'nav-button'} onClick={() => navigate(item)}>{item === 'dashboard' ? 'Dashboard' : item === 'texts' ? 'Reader' : item === 'study' ? 'Study List' : item === 'review' ? `Review${dueCards.length ? ` (${dueCards.length})` : ''}` : 'Settings'}</button>)}
+          {(['dashboard', 'texts', 'saved', 'study', 'review', 'settings'] as Page[]).map((item) => <button key={item} className={page === item || (item === 'texts' && page === 'saved') ? 'nav-button active' : 'nav-button'} onClick={() => navigate(item)}>{item === 'dashboard' ? 'Dashboard' : item === 'texts' ? 'Reader' : item === 'saved' ? 'Saved Texts' : item === 'study' ? 'Study List' : item === 'review' ? `Review${dueCards.length ? ` (${dueCards.length})` : ''}` : 'Settings'}</button>)}
         </nav>
         <button className="theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle light and dark theme">{theme === 'dark' ? '☀' : '☾'} <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
       </aside>
       <main className="content">
         {page === 'dashboard' && <DashboardPage texts={texts} cards={cards} reviewLogs={reviewLogs} dueCount={dueCards.length} onNavigate={navigate} />}
-        {page === 'texts' && <TextsPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} reader={reader} history={history} onOpenReader={openReader} onSaveReader={saveReaderText} onSetHistory={setHistory} />}
+        {(page === 'texts' || page === 'saved') && <TextsPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} reader={reader} history={history} onOpenReader={openReader} onSaveReader={saveReaderText} onSetHistory={setHistory} />}
         {page === 'study' && <StudyPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} onReviewNow={() => navigate('review')} />}
         {page === 'review' && <ReviewPage cards={dueCards} lists={lists} texts={texts} onRefresh={refresh} />}
         {page === 'settings' && <SettingsPage onRefresh={refresh} theme={theme} onThemeChange={setTheme} />}
