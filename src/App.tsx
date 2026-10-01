@@ -5,6 +5,7 @@ import { isDue, scheduleCard } from './lib/scheduler'
 import { generateFlashcards } from './flashcards'
 import { getPinyin, lookupWord, type DictionaryLookup } from './lib/dictionary'
 import { getShortMeaning } from './lib/shortMeaning'
+import { resolveCardData } from './lib/cardData'
 import { analyzeHskWord, getHskLevelForWord, getHskMap, hskRank, HSK_COLORS, type HskLevel } from './lib/hsk'
 import { isDeferredSense } from './lib/dictRank'
 import type { ReviewLog, ReviewRating, StudyList, TextRecord, VocabularyCard } from './types'
@@ -39,6 +40,31 @@ export function App() {
 
   const refresh = async () => {
     const [nextTexts, nextCards, nextLists, nextLogs] = await Promise.all([storage.getTexts(), storage.getCards(), storage.getLists(), storage.getReviewLogs()])
+    if (localStorage.getItem('hanzi-study-card-data-backfill-v1') !== 'done') {
+      const vocabulary = nextCards.filter((card) => !card.vocabularyEntryId)
+      for (const entry of vocabulary) {
+        const linked = nextCards.find((card) => card.vocabularyEntryId === entry.id)
+        const resolved = await resolveCardData(entry, linked)
+        const updatedEntry = { ...entry }
+        if (!entry.meaning?.trim() && resolved.meaning !== 'No meaning available') updatedEntry.meaning = resolved.meaning
+        if (!entry.pinyin?.trim() && resolved.pinyin) updatedEntry.pinyin = resolved.pinyin
+        if (entry.hskLevel === undefined && resolved.hskLevel !== undefined) updatedEntry.hskLevel = resolved.hskLevel
+        if (updatedEntry.meaning !== entry.meaning || updatedEntry.pinyin !== entry.pinyin || updatedEntry.hskLevel !== entry.hskLevel) {
+          await storage.saveCard(updatedEntry, true)
+          const index = nextCards.findIndex((card) => card.id === entry.id)
+          if (index >= 0) nextCards[index] = updatedEntry
+        }
+        for (const flashcard of nextCards.filter((card) => card.vocabularyEntryId === entry.id)) {
+          if (!flashcard.shortMeaning && resolved.meaning !== 'No meaning available') {
+            const updatedFlashcard = { ...flashcard, shortMeaning: resolved.meaning }
+            await storage.saveCard(updatedFlashcard, true)
+            const index = nextCards.findIndex((card) => card.id === flashcard.id)
+            if (index >= 0) nextCards[index] = updatedFlashcard
+          }
+        }
+      }
+      localStorage.setItem('hanzi-study-card-data-backfill-v1', 'done')
+    }
     setTexts(nextTexts.sort((a, b) => b.createdAt - a.createdAt))
     setCards(nextCards)
     setLists(nextLists.sort((a, b) => a.createdAt - b.createdAt))
@@ -656,11 +682,27 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
   }), [cards, filter, selectedListId, selectedSourceId])
   const [sessionCards, setSessionCards] = useState<VocabularyCard[]>(filteredCards)
   const [revealed, setRevealed] = useState(false)
+  const [resolvedData, setResolvedData] = useState<Awaited<ReturnType<typeof resolveCardData>> | null>(null)
+  const [resolvingData, setResolvingData] = useState(false)
   useEffect(() => {
     setSessionCards(filteredCards)
     setRevealed(false)
   }, [filter, selectedListId, selectedSourceId])
   const card = sessionCards[0]
+  useEffect(() => {
+    let active = true
+    setResolvedData(null)
+    if (!card) return () => { active = false }
+    const entry = card.vocabularyEntryId ? cards.find((item) => item.id === card.vocabularyEntryId) : card
+    if (!entry) return () => { active = false }
+    setResolvingData(true)
+    void resolveCardData(entry, card).then((data) => {
+      if (active) setResolvedData(data)
+    }).finally(() => {
+      if (active) setResolvingData(false)
+    })
+    return () => { active = false }
+  }, [card, cards])
   const filterControls = <div className="review-filters panel"><label htmlFor="review-filter">Review</label><select id="review-filter" value={filter} onChange={(event) => setFilter(event.target.value as ReviewFilter)}><option value="all">All due cards ({cards.length})</option><option value="list">From custom list</option><option value="source">From saved text</option></select>{filter === 'list' && <select value={selectedListId} onChange={(event) => setSelectedListId(event.target.value)} aria-label="Review custom list"><option value="">Choose a custom list</option>{lists.map((list) => <option value={list.id} key={list.id}>{list.name}</option>)}</select>}{filter === 'source' && <select value={selectedSourceId} onChange={(event) => setSelectedSourceId(event.target.value)} aria-label="Review saved text"><option value="">Choose a saved text</option>{texts.map((text) => <option value={text.id} key={text.id}>{text.title}</option>)}</select>}</div>
   if (!card) return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<EmptyState text={filteredCards.length || cards.length ? 'You finished this review session or this filter has no due cards.' : 'You are all caught up. Add cards or come back later.'} /></section>
   const rate = async (rating: ReviewRating) => {
@@ -673,8 +715,8 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
   }
   const entry = card.vocabularyEntryId ? cards.find((item) => item.id === card.vocabularyEntryId) : card
   const hanzi = entry?.hanzi ?? (card.cardType === 'recognition' ? card.front : '')
-  const pinyin = entry?.pinyin ?? ''
-  const meanings = [...new Set((entry?.meaning ?? '').split(';').map((meaning) => meaning.trim()).filter(Boolean))].slice(0, 2)
+  const pinyin = resolvedData?.pinyin ?? ''
+  const meanings = resolvedData?.meaning && resolvedData.meaning !== 'No meaning available' ? [resolvedData.meaning] : []
   const example = entry?.note?.trim()
   const mixedDirection = [...card.id].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 2 === 0 ? 'chinese-to-english' : 'english-to-chinese'
   const direction = cardDirection === 'mixed' ? mixedDirection : cardDirection
@@ -684,7 +726,9 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
     const days = intervalFor(rating)
     return days === 0 ? 'Now' : `${days} day${days === 1 ? '' : 's'}`
   }
-  return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} card{sessionCards.length === 1 ? '' : 's'} remaining in this session</div><div className={`review-card panel${revealed ? ' revealed' : ''}`}><div className="review-card-level">{entry?.hskLevel ? `HSK ${entry.hskLevel}` : 'HSK —'}</div><div className="review-prompt-area"><div className={`prompt${direction === 'english-to-chinese' ? ' prompt-meaning' : ''}`}>{frontContent.map((meaning, index) => <span key={meaning}>{index > 0 && <br />}{meaning}</span>)}</div></div>{revealed ? <div className="review-answer-area"><p className="review-pinyin">{pinyin || 'No pinyin available'}</p>{direction === 'english-to-chinese' && <p className="review-hanzi">{hanzi}</p>}{direction === 'chinese-to-english' && (meanings.length ? <ol className="review-meanings">{meanings.map((meaning) => <li key={meaning}>{meaning}</li>)}</ol> : <p className="muted">No meaning available</p>)}{example && <p className="review-example">{example}</p>}</div> : <button className="reveal" onClick={() => setRevealed(true)}>Reveal</button>}</div>{revealed && <><div className="rating-grid">{(['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => <button key={rating} className={`rating ${rating}`} onClick={() => rate(rating)}><strong>{rating[0].toUpperCase() + rating.slice(1)}</strong><small>{intervalLabel(rating)}</small></button>)}</div><button className="mark-known" onClick={() => void rate('easy')}>Mark as known, stop reviewing</button></>}</section>
+  if (resolvingData || !resolvedData) return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} cards remaining in this session</div><div className="panel review-loading">Loading dictionary data…</div></section>
+  const resolvedFrontContent = direction === 'english-to-chinese' ? (meanings.length ? meanings : ['No meaning available']) : [hanzi]
+  return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<div className="review-session-count">{sessionCards.length} card{sessionCards.length === 1 ? '' : 's'} remaining in this session</div><div className={`review-card panel${revealed ? ' revealed' : ''}`}><div className="review-card-level">{resolvedData.hskLevel ? `HSK ${resolvedData.hskLevel}` : 'HSK —'}</div><div className="review-prompt-area"><div className={`prompt${direction === 'english-to-chinese' ? ' prompt-meaning' : ''}`}>{resolvedFrontContent.map((meaning, index) => <span key={meaning}>{index > 0 && <br />}{meaning}</span>)}</div></div>{revealed ? <div className="review-answer-area"><p className="review-pinyin">{pinyin || 'No pinyin available'}</p>{direction === 'english-to-chinese' && <p className="review-hanzi">{hanzi}</p>}{direction === 'chinese-to-english' && (meanings.length ? <ol className="review-meanings">{meanings.map((meaning) => <li key={meaning}>{meaning}</li>)}</ol> : <p className="muted">No meaning available</p>)}{example && <p className="review-example">{example}</p>}</div> : <button className="reveal" onClick={() => setRevealed(true)}>Reveal</button>}</div>{revealed && <><div className="rating-grid">{(['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => <button key={rating} className={`rating ${rating}`} onClick={() => rate(rating)}><strong>{rating[0].toUpperCase() + rating.slice(1)}</strong><small>{intervalLabel(rating)}</small></button>)}</div><button className="mark-known" onClick={() => void rate('easy')}>Mark as known, stop reviewing</button></>}</section>
 }
 
 function SectionHeading({ title, description }: { title: string; description: string }) { return <div className="section-heading"><div><p className="eyebrow">YOUR LIBRARY</p><h2>{title}</h2><p className="muted">{description}</p></div></div> }

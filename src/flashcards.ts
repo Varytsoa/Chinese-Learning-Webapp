@@ -29,6 +29,7 @@ export async function generateFlashcards(entry: VocabularyCard): Promise<Vocabul
       cardType: 'recognition',
       front: hanzi,
       back: answerWithPinyin,
+      shortMeaning: meaning,
     },
     {
       ...base,
@@ -36,6 +37,7 @@ export async function generateFlashcards(entry: VocabularyCard): Promise<Vocabul
       cardType: 'recall',
       front: meaning,
       back: answerWithHanzi,
+      shortMeaning: meaning,
     },
   ]
   const existing = await Promise.all(

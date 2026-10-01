@@ -19,6 +19,7 @@ export interface VocabularyCard {
   hanzi?: string
   pinyin?: string
   meaning?: string
+  shortMeaning?: string
   hskLevel?: number | '7-9'
   inStudyList?: boolean
   listIds: string[]
