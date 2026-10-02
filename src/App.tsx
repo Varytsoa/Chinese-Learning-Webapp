@@ -10,10 +10,11 @@ import { analyzeHskWord, getHskLevelForWord, getHskMap, hskRank, HSK_COLORS, typ
 import { isDeferredSense } from './lib/dictRank'
 import type { ReviewLog, ReviewRating, StudyList, TextRecord, VocabularyCard } from './types'
 
-type Page = 'dashboard' | 'texts' | 'saved' | 'study' | 'review' | 'settings'
+type Section = 'dashboard' | 'reader' | 'saved' | 'study' | 'review' | 'settings'
 type Theme = 'light' | 'dark' | 'system'
 type CardDirection = 'chinese-to-english' | 'english-to-chinese' | 'mixed'
 interface ReadingHistoryEntry { id: string; title: string; content: string; readAt: number; savedId?: string }
+interface OpenText { id: string; title: string; content: string; saved: boolean; origin: 'reader' | 'saved' }
 const MASTERED_INTERVAL_DAYS = 21
 const NEAR_MASTERED_INTERVAL_DAYS = 7
 const RECENT_LAPSE_DAYS = 14
@@ -24,10 +25,10 @@ const emptyCard = (textId: string): VocabularyCard => ({
 })
 
 export function App() {
-  const [page, setPage] = useState<Page>('dashboard')
+  const [section, setSection] = useState<Section>('dashboard')
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('hanzi-study-theme') as Theme | null) ?? 'system')
   const [cardDirection, setCardDirection] = useState<CardDirection>(() => (localStorage.getItem('hanzi-study-card-direction') as CardDirection | null) ?? 'mixed')
-  const [reader, setReader] = useState<{ id: string; title: string; content: string; saved: boolean } | null>(null)
+  const [openText, setOpenText] = useState<OpenText | null>(null)
   const [history, setHistory] = useState<ReadingHistoryEntry[]>(() => {
     try { return JSON.parse(localStorage.getItem('hanzi-study-history') ?? '[]') as ReadingHistoryEntry[] } catch { return [] }
   })
@@ -75,26 +76,27 @@ export function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('hanzi-study-theme', theme)
   }, [theme])
-  const navigate = (nextPage: Page) => {
-    setPage(nextPage)
+  const navigate = (nextSection: Section) => {
+    setSection(nextSection)
+    setOpenText(null)
   }
-  const openReader = (next: { id: string; title: string; content: string; saved: boolean } | null) => {
-    if (!next) { setReader(null); return }
-    setReader(next)
+  const openReader = (next: Omit<OpenText, 'origin'> | null, origin: OpenText['origin']) => {
+    if (!next) { setOpenText(null); return }
+    setOpenText({ ...next, origin })
     const entry: ReadingHistoryEntry = { id: next.id || makeId(), title: next.title || 'Untitled text', content: next.content, readAt: Date.now(), savedId: next.saved ? next.id : undefined }
     const nextHistory = [entry, ...history.filter((item) => item.id !== entry.id)].slice(0, 30)
     setHistory(nextHistory)
     localStorage.setItem('hanzi-study-history', JSON.stringify(nextHistory))
   }
   const saveReaderText = async () => {
-    if (!reader || reader.saved) return
-    const firstWords = reader.content.trim().slice(0, 24)
+    if (!openText || openText.saved) return
+    const firstWords = openText.content.trim().slice(0, 24)
     const title = window.prompt('Title for this text:', firstWords)
     if (!title?.trim()) return
     const id = makeId()
-    await storage.saveText({ id, title: title.trim(), content: reader.content, createdAt: Date.now() })
-    setReader({ ...reader, id, title: title.trim(), saved: true })
-    const nextHistory = history.map((item) => item.id === reader.id ? { ...item, id, title: title.trim(), savedId: id } : item)
+    await storage.saveText({ id, title: title.trim(), content: openText.content, createdAt: Date.now() })
+    setOpenText({ ...openText, id, title: title.trim(), saved: true })
+    const nextHistory = history.map((item) => item.id === openText.id ? { ...item, id, title: title.trim(), savedId: id } : item)
     setHistory(nextHistory)
     localStorage.setItem('hanzi-study-history', JSON.stringify(nextHistory))
     await refresh()
@@ -108,16 +110,17 @@ export function App() {
       <aside className="sidebar">
         <div className="sidebar-brand"><p className="eyebrow">PERSONAL STUDY SPACE</p><h1>Hanzi Study</h1></div>
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {(['dashboard', 'texts', 'saved', 'study', 'review', 'settings'] as Page[]).map((item) => <button key={item} className={page === item || (item === 'texts' && page === 'saved') ? 'nav-button active' : 'nav-button'} onClick={() => navigate(item)}>{item === 'dashboard' ? 'Dashboard' : item === 'texts' ? 'Reader' : item === 'saved' ? 'Saved Texts' : item === 'study' ? 'Study List' : item === 'review' ? `Review${dueCards.length ? ` (${dueCards.length})` : ''}` : 'Settings'}</button>)}
+          {(['dashboard', 'reader', 'saved', 'study', 'review', 'settings'] as Section[]).map((item) => <button key={item} className={section === item ? 'nav-button active' : 'nav-button'} onClick={() => navigate(item)}>{item === 'dashboard' ? 'Dashboard' : item === 'reader' ? 'Reader' : item === 'saved' ? 'Saved Texts' : item === 'study' ? 'Study List' : item === 'review' ? `Review${dueCards.length ? ` (${dueCards.length})` : ''}` : 'Settings'}</button>)}
         </nav>
         <button className="theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle light and dark theme">{theme === 'dark' ? '☀' : '☾'} <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
       </aside>
       <main className="content">
-        {page === 'dashboard' && <DashboardPage texts={texts} cards={cards} reviewLogs={reviewLogs} dueCount={dueCards.length} onNavigate={navigate} />}
-        {(page === 'texts' || page === 'saved') && <TextsPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} reader={reader} history={history} onOpenReader={openReader} onSaveReader={saveReaderText} onSetHistory={setHistory} />}
-        {page === 'study' && <StudyPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} onReviewNow={() => navigate('review')} />}
-        {page === 'review' && <ReviewPage cards={dueCards} allCards={cards} lists={lists} texts={texts} onRefresh={refresh} cardDirection={cardDirection} />}
-        {page === 'settings' && <SettingsPage onRefresh={refresh} theme={theme} onThemeChange={setTheme} cardDirection={cardDirection} onCardDirectionChange={(direction) => { setCardDirection(direction); localStorage.setItem('hanzi-study-card-direction', direction) }} />}
+        {section === 'dashboard' && <DashboardPage texts={texts} cards={cards} reviewLogs={reviewLogs} dueCount={dueCards.length} onNavigate={navigate} onOpenSavedText={(text) => openReader({ ...text, saved: true }, 'saved')} />}
+        {section === 'reader' && <ReaderPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} openText={openText?.origin === 'reader' ? openText : null} history={history} onOpenReader={(text) => openReader(text, 'reader')} onBack={() => setOpenText(null)} onSaveReader={saveReaderText} onSetHistory={setHistory} />}
+        {section === 'saved' && <SavedTextsPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} openText={openText?.origin === 'saved' ? openText : null} onOpenReader={(text) => openReader(text, 'saved')} onBack={() => setOpenText(null)} onSaveReader={saveReaderText} onGoToReader={() => navigate('reader')} />}
+        {section === 'study' && <StudyPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} onReviewNow={() => navigate('review')} />}
+        {section === 'review' && <ReviewPage cards={dueCards} allCards={cards} lists={lists} texts={texts} onRefresh={refresh} cardDirection={cardDirection} />}
+        {section === 'settings' && <SettingsPage onRefresh={refresh} theme={theme} onThemeChange={setTheme} cardDirection={cardDirection} onCardDirectionChange={(direction) => { setCardDirection(direction); localStorage.setItem('hanzi-study-card-direction', direction) }} />}
       </main>
     </div>
   )
@@ -134,7 +137,7 @@ function wordStatus(entry: VocabularyCard, cards: VocabularyCard[]): 'known' | '
   return linked.every((card) => card.intervalDays >= 21) ? 'known' : 'learning'
 }
 
-function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { texts: TextRecord[]; cards: VocabularyCard[]; reviewLogs: ReviewLog[]; dueCount: number; onNavigate: (page: Page) => void }) {
+function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate, onOpenSavedText }: { texts: TextRecord[]; cards: VocabularyCard[]; reviewLogs: ReviewLog[]; dueCount: number; onNavigate: (section: Section) => void; onOpenSavedText: (text: TextRecord) => void }) {
   const [hskMap, setHskMap] = useState<Map<string, HskLevel>>(new Map())
   const [recentCardData, setRecentCardData] = useState<Record<string, Awaited<ReturnType<typeof resolveCardData>>>>({})
   const vocabulary = cards.filter((card) => !card.vocabularyEntryId)
@@ -188,15 +191,15 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
     const levels = segmentChineseText(content).filter((segment) => segment.isWordLike).map((segment) => getHskLevelForWord(segment.text, hskMap))
     return levels.filter((level): level is HskLevel => level !== undefined).sort((a, b) => hskRank(b) - hskRank(a))[0]
   }
-  const empty = (message: string, page: Page) => <div className="dashboard-empty"><span>{message}</span><button className="quiet" onClick={() => onNavigate(page)}>Get started</button></div>
+  const empty = (message: string, section: Section) => <div className="dashboard-empty"><span>{message}</span><button className="quiet" onClick={() => onNavigate(section)}>Get started</button></div>
   return <section className="dashboard-page">
     <SectionHeading title="Dashboard" description="Your local Chinese study space at a glance." />
     <div className="dashboard-columns">
       <div className="dashboard-main">
         <article className="dashboard-panel due-panel"><p className="dashboard-title">DUE FOR REVIEW</p><strong className="due-number">{dueCount}</strong><span className="muted">cards waiting</span><button className="primary" onClick={() => onNavigate('review')}>Flashcards</button></article>
         <div className="stat-tiles"><div className="dashboard-panel stat-tile"><strong>{streak}</strong><span className="muted">day streak</span></div><div className="dashboard-panel stat-tile"><strong>{reviewedToday.length}</strong><span className="muted">reviewed today</span></div><div className="dashboard-panel stat-tile"><strong>{reviewedToday.filter((log) => log.rating === 'good' || log.rating === 'easy').length}</strong><span className="muted">promoted today</span></div></div>
-        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY ADDED TO STUDY LIST</p><button className="link-button" onClick={() => onNavigate('study')}>View all →</button></div>{recentWords.length ? <div className="mini-card-grid">{recentWords.map((entry) => { const word = entry.hanzi ?? entry.front; const data = recentCardData[entry.id]; const level = data?.hskLevel ?? getHskLevelForWord(word, hskMap); return <div className="mini-word-card" key={entry.id}><strong style={{ color: level ? HSK_COLORS[level] : undefined }}>{word}</strong><span className="tag recent-hsk-badge">{level ? `HSK ${level}` : 'Not in HSK'}</span><span className="word-pinyin">{data?.pinyin ?? entry.pinyin ?? ''}</span><span className="muted small recent-meaning">{data?.meaning ?? 'No meaning available'}</span></div> })}</div> : empty('No vocabulary added yet.', 'texts')}</article>
-        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY SAVED TEXTS</p><button className="link-button" onClick={() => onNavigate('texts')}>View all →</button></div>{texts.length ? <div className="saved-text-list">{texts.slice(0, 3).map((text) => <div className="saved-text-row" key={text.id}><strong>{text.title}</strong><span className="muted small">{new Date(text.createdAt).toLocaleDateString()}</span><span className="tag hsk-badge">{hardestTextLevel(text.content) ? `HSK ${hardestTextLevel(text.content)}` : 'Not in HSK'}</span></div>)}</div> : empty('Save a text to see it here.', 'texts')}</article>
+        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY ADDED TO STUDY LIST</p><button className="link-button" onClick={() => onNavigate('study')}>View all →</button></div>{recentWords.length ? <div className="mini-card-grid">{recentWords.map((entry) => { const word = entry.hanzi ?? entry.front; const data = recentCardData[entry.id]; const level = data?.hskLevel ?? getHskLevelForWord(word, hskMap); return <div className="mini-word-card" key={entry.id}><strong style={{ color: level ? HSK_COLORS[level] : undefined }}>{word}</strong><span className="tag recent-hsk-badge">{level ? `HSK ${level}` : 'Not in HSK'}</span><span className="word-pinyin">{data?.pinyin ?? entry.pinyin ?? ''}</span><span className="muted small recent-meaning">{data?.meaning ?? 'No meaning available'}</span></div> })}</div> : empty('No vocabulary added yet.', 'study')}</article>
+        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY SAVED TEXTS</p><button className="link-button" onClick={() => onNavigate('saved')}>View all →</button></div>{texts.length ? <div className="saved-text-list">{texts.slice(0, 3).map((text) => <div className="saved-text-row" key={text.id} onClick={() => onOpenSavedText(text)}><strong>{text.title}</strong><span className="muted small">{new Date(text.createdAt).toLocaleDateString()}</span><span className="tag hsk-badge">{hardestTextLevel(text.content) ? `HSK ${hardestTextLevel(text.content)}` : 'Not in HSK'}</span></div>)}</div> : empty('Save a text to see it here.', 'reader')}</article>
       </div>
       <div className="dashboard-side">
         <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">STUDY ACTIVITY</p><span className="muted small">{reviewLogs.length} reviews · {new Set(reviewLogs.map((log) => dayKey(log.reviewedAt))).size} days</span></div><div className="heatmap-months">{monthLabels.map((month) => month && <span key={month.index} style={{ gridColumn: month.index + 1 }}>{month.label}</span>)}</div><div className="heatmap-layout"><div className="heatmap-weekdays"><span>Mon</span><span>Wed</span><span>Fri</span></div><div className="heatmap">{activityWeeks.map((week, weekIndex) => <div className="heatmap-week" key={weekIndex}>{week.map((date) => { const count = reviewCounts.get(dayKey(date.getTime())) ?? 0; return <span className={`heatmap-cell heatmap-level-${Math.min(4, count)}`} key={date.toISOString()} title={`${date.toLocaleDateString()}: ${count} reviews`} /> })}</div>)}</div></div><div className="heatmap-legend"><span>Less</span><i /><i /><i /><i /><span>More</span></div></article>
@@ -292,7 +295,7 @@ function SettingsPage({ onRefresh, theme, onThemeChange, cardDirection, onCardDi
   </section>
 }
 
-function TextsPage({ texts, cards, lists, onRefresh, reader, history, onOpenReader, onSaveReader, onSetHistory }: { texts: TextRecord[]; cards: VocabularyCard[]; lists: StudyList[]; onRefresh: () => Promise<void>; reader: { id: string; title: string; content: string; saved: boolean } | null; history: ReadingHistoryEntry[]; onOpenReader: (reader: { id: string; title: string; content: string; saved: boolean } | null) => void; onSaveReader: () => Promise<void>; onSetHistory: (history: ReadingHistoryEntry[]) => void }) {
+function ReaderPage({ texts, cards, lists, onRefresh, openText, history, onOpenReader, onBack, onSaveReader, onSetHistory }: { texts: TextRecord[]; cards: VocabularyCard[]; lists: StudyList[]; onRefresh: () => Promise<void>; openText: OpenText | null; history: ReadingHistoryEntry[]; onOpenReader: (text: Omit<OpenText, 'origin'>) => void; onBack: () => void; onSaveReader: () => Promise<void>; onSetHistory: (history: ReadingHistoryEntry[]) => void }) {
   const [content, setContent] = useState('')
   const [hskMap, setHskMap] = useState<Map<string, HskLevel>>(new Map())
   const uploadRef = useRef<HTMLInputElement>(null)
@@ -323,11 +326,30 @@ function TextsPage({ texts, cards, lists, onRefresh, reader, history, onOpenRead
     await storage.deleteText(text.id)
     await onRefresh()
   }
-  const openSavedText = (text: TextRecord) => onOpenReader({ id: text.id, title: text.title, content: text.content, saved: true })
   const wordCount = (content: string) => segmentChineseText(content).filter((segment) => segment.isWordLike).length
   return <section className="import-page">
-    {!reader && <><div className="import-heading"><div><h2>Import Text</h2><p className="muted">Turn any text, image or SRT into an interactive Chinese reader.</p></div><label className="upload-button">Upload <select onChange={() => uploadRef.current?.click()} aria-label="Upload text file"><option value="">Choose file</option><option value=".txt">.txt</option><option value=".srt">.srt</option><option value=".epub">.epub</option></select><input ref={uploadRef} hidden type="file" accept=".txt,.srt,.epub" onChange={upload} /></label></div><div className="import-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Paste Simplified or Traditional Chinese text here..." rows={12} /><div className="import-actions"><button className="primary import-read" onClick={read}>Read →</button><button className="quiet" onClick={() => setContent('这是一个中文阅读练习。欢迎来到汉字学习。')}>Try sample</button></div></div><div className="saved-texts-heading"><h3>Saved texts</h3></div><div className="saved-texts-grid">{texts.length ? texts.map((text) => <article className="saved-text-card" key={text.id} onClick={() => openSavedText(text)}><button className="saved-text-delete" aria-label={`Delete ${text.title}`} onClick={(event) => { event.stopPropagation(); void deleteText(text) }}>×</button><strong>{text.title}</strong><span className="tag hsk-badge">{badge(text.content)}</span><span className="muted small">{new Date(text.createdAt).toLocaleDateString()} · {wordCount(text.content)} words</span></article>) : <div className="dashboard-empty"><span>No saved texts yet.</span><button className="quiet" onClick={() => document.querySelector<HTMLTextAreaElement>('.import-box textarea')?.focus()}>Import your first text</button></div>}</div><div className="history-heading"><h3>Reading History</h3><button className="link-button" onClick={() => { onSetHistory([]); localStorage.removeItem('hanzi-study-history') }}>Clear history</button></div><div className="history-grid">{history.length ? history.map((item) => <article className="history-card" key={item.id} onClick={() => onOpenReader({ id: item.savedId ?? '', title: item.title, content: item.content, saved: Boolean(item.savedId) })}><button className="history-remove" aria-label="Remove from reading history" onClick={(event) => { event.stopPropagation(); removeHistory(item.id) }}>×</button><strong>{item.title}</strong><span className="tag hsk-badge">{badge(item.content)}</span><span className="muted small">{new Date(item.readAt).toLocaleDateString()} · {segmentChineseText(item.content).filter((segment) => segment.isWordLike).length} words</span><span className="muted small">{item.content.split(/\r?\n/)[0]}</span></article>) : <p className="muted">No reading history yet.</p>}</div></>}
-    {reader && <><div className="reader-page-heading"><button className="quiet" onClick={() => onOpenReader(null)}>← Import another</button><span className="not-saved-badge">{reader.saved ? 'Saved' : 'Not saved'}</span></div><TextReader text={texts.find((item) => item.id === reader.id) ?? { id: reader.id, title: reader.title, content: reader.content, createdAt: 0 }} cards={cards} lists={lists} onRefresh={onRefresh} unsaved={!reader.saved} onSave={onSaveReader} /></>}
+    {!openText && <><div className="import-heading"><div><h2>Import Text</h2><p className="muted">Turn any text, image or SRT into an interactive Chinese reader.</p></div><label className="upload-button">Upload <select onChange={() => uploadRef.current?.click()} aria-label="Upload text file"><option value="">Choose file</option><option value=".txt">.txt</option><option value=".srt">.srt</option><option value=".epub">.epub</option></select><input ref={uploadRef} hidden type="file" accept=".txt,.srt,.epub" onChange={upload} /></label></div><div className="import-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Paste Simplified or Traditional Chinese text here..." rows={12} /><div className="import-actions"><button className="primary import-read" onClick={read}>Read →</button><button className="quiet" onClick={() => setContent('这是一个中文阅读练习。欢迎来到汉字学习。')}>Try sample</button></div></div><div className="history-heading"><h3>Reading History</h3><button className="link-button" onClick={() => { onSetHistory([]); localStorage.removeItem('hanzi-study-history') }}>Clear history</button></div><div className="history-grid">{history.length ? history.map((item) => <article className="history-card" key={item.id} onClick={() => onOpenReader({ id: item.savedId ?? '', title: item.title, content: item.content, saved: Boolean(item.savedId) })}><button className="history-remove" aria-label="Remove from reading history" onClick={(event) => { event.stopPropagation(); removeHistory(item.id) }}>×</button><strong>{item.title}</strong><span className="tag hsk-badge">{badge(item.content)}</span><span className="muted small">{new Date(item.readAt).toLocaleDateString()} · {segmentChineseText(item.content).filter((segment) => segment.isWordLike).length} words</span><span className="muted small">{item.content.split(/\r?\n/)[0]}</span></article>) : <p className="muted">No reading history yet.</p>}</div></>}
+    {openText && <><div className="reader-page-heading"><button className="quiet" onClick={onBack}>← Reader</button><span className="not-saved-badge">{openText.saved ? 'Saved' : 'Not saved'}</span></div><TextReader text={texts.find((item) => item.id === openText.id) ?? { id: openText.id, title: openText.title, content: openText.content, createdAt: 0 }} cards={cards} lists={lists} onRefresh={onRefresh} unsaved={!openText.saved} onSave={onSaveReader} /></>}
+  </section>
+}
+
+function SavedTextsPage({ texts, cards, lists, onRefresh, openText, onOpenReader, onBack, onSaveReader, onGoToReader }: { texts: TextRecord[]; cards: VocabularyCard[]; lists: StudyList[]; onRefresh: () => Promise<void>; openText: OpenText | null; onOpenReader: (text: Omit<OpenText, 'origin'>) => void; onBack: () => void; onSaveReader: () => Promise<void>; onGoToReader: () => void }) {
+  const [hskMap, setHskMap] = useState<Map<string, HskLevel>>(new Map())
+  useEffect(() => { getHskMap().then(setHskMap) }, [])
+  const badge = (content: string) => {
+    const levels = segmentChineseText(content).filter((segment) => segment.isWordLike).map((segment) => getHskLevelForWord(segment.text, hskMap)).filter((level): level is HskLevel => level !== undefined)
+    const level = levels.sort((a, b) => hskRank(b) - hskRank(a))[0]
+    return level ? `HSK ${level}` : 'Not in HSK'
+  }
+  const deleteText = async (text: TextRecord) => {
+    if (!window.confirm(`Delete "${text.title}"?`)) return
+    await storage.deleteText(text.id)
+    await onRefresh()
+  }
+  const wordCount = (content: string) => segmentChineseText(content).filter((segment) => segment.isWordLike).length
+  return <section className="import-page">
+    {!openText && <><SectionHeading title="Saved Texts" description="Your saved Chinese reading texts." />{texts.length ? <div className="saved-texts-grid">{texts.map((text) => <article className="saved-text-card" key={text.id} onClick={() => onOpenReader({ id: text.id, title: text.title, content: text.content, saved: true })}><button className="saved-text-delete" aria-label={`Delete ${text.title}`} onClick={(event) => { event.stopPropagation(); void deleteText(text) }}>×</button><strong>{text.title}</strong><span className="tag hsk-badge">{badge(text.content)}</span><span className="muted small">{new Date(text.createdAt).toLocaleDateString()} · {wordCount(text.content)} words</span></article>)}</div> : <div className="dashboard-empty"><span>No saved texts yet.</span><button className="quiet" onClick={onGoToReader}>Go to Reader</button></div>}</>}
+    {openText && <><div className="reader-page-heading"><button className="quiet" onClick={onBack}>← Saved Texts</button><span className="not-saved-badge">Saved</span></div><TextReader text={texts.find((item) => item.id === openText.id) ?? { id: openText.id, title: openText.title, content: openText.content, createdAt: 0 }} cards={cards} lists={lists} onRefresh={onRefresh} unsaved={!openText.saved} onSave={onSaveReader} /></>}
   </section>
 }
 
