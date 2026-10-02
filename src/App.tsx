@@ -80,7 +80,7 @@ export function App() {
     const [nextTexts, nextCards, nextLists, nextLogs] = await Promise.all([storage.getTexts(), storage.getCards(), storage.getLists(), storage.getReviewLogs()])
     const textMap = hskMap.size ? hskMap : await getHskMap()
     const enrichedTexts = await Promise.all(nextTexts.map(async (text) => {
-      if (text.hskLevel !== undefined && text.wordCount !== undefined) return text
+      if (text.wordCount !== undefined) return text
       const stats = getTextStats(text.content, textMap)
       const enriched = { ...text, hskLevel: text.hskLevel ?? stats.hskLevel, wordCount: text.wordCount ?? stats.wordCount }
       await storage.saveText(enriched)
@@ -227,7 +227,7 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, hskMap, onNavigate,
   }).slice(0, 3)
   const hskBadge = (word: string) => { const level = getHskLevelForWord(word, hskMap); return level ? `HSK ${level}` : 'Not in HSK' }
   const textStats = useMemo(() => new Map(texts.map((text) => {
-    const computed = text.hskLevel === undefined || text.wordCount === undefined ? getTextStats(text.content, hskMap) : undefined
+    const computed = text.wordCount === undefined ? getTextStats(text.content, hskMap) : undefined
     return [text.id, { hskLevel: text.hskLevel ?? computed?.hskLevel, wordCount: text.wordCount ?? computed?.wordCount ?? 0 }] as const
   })), [texts, hskMap])
   const hardestTextLevel = (content: string) => {
@@ -401,7 +401,7 @@ const HistoryCard = memo(function HistoryCard({ item, onOpenReader, onRemove }: 
 
 function SavedTextsPage({ texts, cards, lists, hskMap, onRefresh, openText, onOpenReader, onBack, onSaveReader, onGoToReader }: { texts: TextRecord[]; cards: VocabularyCard[]; lists: StudyList[]; hskMap: Map<string, HskLevel>; onRefresh: () => Promise<void>; openText: OpenText | null; onOpenReader: (text: Omit<OpenText, 'origin'>) => void; onBack: () => void; onSaveReader: () => Promise<void>; onGoToReader: () => void }) {
   const textStats = useMemo(() => new Map(texts.map((text) => {
-    const computed = text.hskLevel === undefined || text.wordCount === undefined ? getTextStats(text.content, hskMap) : undefined
+    const computed = text.wordCount === undefined ? getTextStats(text.content, hskMap) : undefined
     return [text.id, { hskLevel: text.hskLevel ?? computed?.hskLevel, wordCount: text.wordCount ?? computed?.wordCount ?? 0 }] as const
   })), [texts, hskMap])
   const deleteText = async (text: TextRecord) => {
