@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { makeId, storage } from './storage'
 import { parseAppDataExport, type ImportMode } from './storage'
 import { isDue, scheduleCard } from './lib/scheduler'
@@ -13,11 +13,24 @@ import type { ReviewLog, ReviewRating, StudyList, TextRecord, VocabularyCard } f
 type Section = 'dashboard' | 'reader' | 'saved' | 'study' | 'review' | 'settings'
 type Theme = 'light' | 'dark' | 'system'
 type CardDirection = 'chinese-to-english' | 'english-to-chinese' | 'mixed'
-interface ReadingHistoryEntry { id: string; title: string; content: string; readAt: number; savedId?: string; hskLevel?: HskLevel; wordCount?: number }
+interface ReadingHistoryEntry { id: string; title: string; content: string; readAt: number; savedId?: string; hskLevel?: HskLevel; wordCount?: number; preview?: string }
 interface OpenText { id: string; title: string; content: string; saved: boolean; origin: 'reader' | 'saved' }
 const MASTERED_INTERVAL_DAYS = 21
 const NEAR_MASTERED_INTERVAL_DAYS = 7
 const RECENT_LAPSE_DAYS = 14
+type SegmenterLike = { segment: (value: string) => Iterable<{ segment: string; isWordLike?: boolean }> }
+const segmenter: SegmenterLike | undefined = (() => {
+  const Segmenter = (Intl as typeof Intl & { Segmenter?: new (locales?: string | string[], options?: { granularity?: 'word' }) => SegmenterLike }).Segmenter
+  return Segmenter ? new Segmenter('zh-Hans', { granularity: 'word' }) : undefined
+})()
+const pinyinCache = new Map<string, string>()
+function getCachedPinyin(word: string): string {
+  const cached = pinyinCache.get(word)
+  if (cached) return cached
+  const value = getPinyin(word)
+  pinyinCache.set(word, value)
+  return value
+}
 
 const emptyCard = (textId: string): VocabularyCard => ({
   id: makeId(), textId, front: '', back: '', note: '', listIds: [], dueDate: Date.now(),
@@ -40,6 +53,7 @@ async function runBackgroundBackfill(): Promise<void> {
       for (const flashcard of cards.filter((card) => card.vocabularyEntryId === entry.id)) {
         if (!flashcard.shortMeaning && resolved.meaning !== 'No meaning available') await storage.saveCard({ ...flashcard, shortMeaning: resolved.meaning }, true)
       }
+
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
   }
@@ -100,7 +114,7 @@ export function App() {
     setSection(origin)
     setOpenText({ ...next, origin })
     const stats = getTextStats(next.content, hskMap)
-    const entry: ReadingHistoryEntry = { id: next.id || makeId(), title: next.title || 'Untitled text', content: next.content, readAt: Date.now(), savedId: next.saved ? next.id : undefined, hskLevel: stats.hskLevel, wordCount: stats.wordCount }
+    const entry: ReadingHistoryEntry = { id: next.id || makeId(), title: next.title || 'Untitled text', content: next.content, readAt: Date.now(), savedId: next.saved ? next.id : undefined, hskLevel: stats.hskLevel, wordCount: stats.wordCount, preview: next.content.split(/\r?\n/)[0] ?? '' }
     const nextHistory = [entry, ...history.filter((item) => item.id !== entry.id)].slice(0, 30)
     setHistory(nextHistory)
     localStorage.setItem('hanzi-study-history', JSON.stringify(nextHistory))
@@ -343,14 +357,24 @@ function ReaderPage({ texts, cards, lists, hskMap, onRefresh, openText, history,
     onSetHistory(next)
     localStorage.setItem('hanzi-study-history', JSON.stringify(next))
   }
-  const badge = (content: string) => {
-    const level = getTextStats(content, hskMap).hskLevel
-    return level ? `HSK ${level}` : 'Not in HSK'
-  }
-  const historyStats = useMemo(() => new Map(history.map((item) => {
-    const computed = item.hskLevel === undefined || item.wordCount === undefined ? getTextStats(item.content, hskMap) : undefined
-    return [item.id, { hskLevel: item.hskLevel ?? computed?.hskLevel, wordCount: item.wordCount ?? computed?.wordCount ?? 0 }] as const
-  })), [history, hskMap])
+  useEffect(() => {
+    const missing = history.filter((item) => item.hskLevel === undefined || item.wordCount === undefined || item.preview === undefined)
+    if (!missing.length) return
+    let cancelled = false
+    const process = () => {
+      if (cancelled) return
+      const batch = missing.slice(0, 3)
+      const updates = new Map(batch.map((item) => {
+        const stats = getTextStats(item.content, hskMap)
+        return [item.id, { ...item, hskLevel: item.hskLevel ?? stats.hskLevel, wordCount: item.wordCount ?? stats.wordCount, preview: item.preview ?? item.content.split(/\r?\n/)[0] ?? '' }]
+      }))
+      const next = history.map((item) => updates.get(item.id) ?? item)
+      onSetHistory(next)
+      localStorage.setItem('hanzi-study-history', JSON.stringify(next))
+    }
+    const idle = window.setTimeout(process, 0)
+    return () => { cancelled = true; window.clearTimeout(idle) }
+  }, [history, hskMap, onSetHistory])
   const deleteText = async (text: TextRecord) => {
     if (!window.confirm(`Delete "${text.title}"?`)) return
     await storage.deleteText(text.id)
@@ -358,10 +382,20 @@ function ReaderPage({ texts, cards, lists, hskMap, onRefresh, openText, history,
   }
   const wordCount = (content: string) => segmentChineseText(content).filter((segment) => segment.isWordLike).length
   return <section className="import-page">
-    {!openText && <><div className="import-heading"><div><h2>Import Text</h2><p className="muted">Turn any text, image or SRT into an interactive Chinese reader.</p></div><label className="upload-button">Upload <select onChange={() => uploadRef.current?.click()} aria-label="Upload text file"><option value="">Choose file</option><option value=".txt">.txt</option><option value=".srt">.srt</option><option value=".epub">.epub</option></select><input ref={uploadRef} hidden type="file" accept=".txt,.srt,.epub" onChange={upload} /></label></div><div className="import-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Paste Simplified or Traditional Chinese text here..." rows={12} /><div className="import-actions"><button className="primary import-read" onClick={read}>Read →</button><button className="quiet" onClick={() => setContent('这是一个中文阅读练习。欢迎来到汉字学习。')}>Try sample</button></div></div><div className="history-heading"><h3>Reading History</h3><button className="link-button" onClick={() => { onSetHistory([]); localStorage.removeItem('hanzi-study-history') }}>Clear history</button></div><div className="history-grid">{history.length ? history.map((item) => { const stats = historyStats.get(item.id); return <article className="history-card" key={item.id} onClick={() => onOpenReader({ id: item.savedId ?? '', title: item.title, content: item.content, saved: Boolean(item.savedId) })}><button className="history-remove" aria-label="Remove from reading history" onClick={(event) => { event.stopPropagation(); removeHistory(item.id) }}>×</button><strong>{item.title}</strong><span className="tag hsk-badge">{stats?.hskLevel ? `HSK ${stats.hskLevel}` : 'Not in HSK'}</span><span className="muted small">{new Date(item.readAt).toLocaleDateString()} · {stats?.wordCount ?? 0} words</span><span className="muted small">{item.content.split(/\r?\n/)[0]}</span></article> }) : <p className="muted">No reading history yet.</p>}</div></>}
+    {!openText && <><div className="import-heading"><div><h2>Import Text</h2><p className="muted">Turn any text, image or SRT into an interactive Chinese reader.</p></div><label className="upload-button">Upload <select onChange={() => uploadRef.current?.click()} aria-label="Upload text file"><option value="">Choose file</option><option value=".txt">.txt</option><option value=".srt">.srt</option><option value=".epub">.epub</option></select><input ref={uploadRef} hidden type="file" accept=".txt,.srt,.epub" onChange={upload} /></label></div><div className="import-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Paste Simplified or Traditional Chinese text here..." rows={12} /><div className="import-actions"><button className="primary import-read" onClick={read}>Read →</button><button className="quiet" onClick={() => setContent('这是一个中文阅读练习。欢迎来到汉字学习。')}>Try sample</button></div></div><div className="history-heading"><h3>Reading History</h3><button className="link-button" onClick={() => { onSetHistory([]); localStorage.removeItem('hanzi-study-history') }}>Clear history</button></div><div className="history-grid">{history.length ? history.map((item) => <HistoryCard key={item.id} item={item} onOpenReader={onOpenReader} onRemove={removeHistory} />) : <p className="muted">No reading history yet.</p>}</div></>}
     {openText && <><div className="reader-page-heading"><button className="quiet" onClick={onBack}>← Reader</button><span className="not-saved-badge">{openText.saved ? 'Saved' : 'Not saved'}</span></div><TextReader text={texts.find((item) => item.id === openText.id) ?? { id: openText.id, title: openText.title, content: openText.content, createdAt: 0 }} cards={cards} lists={lists} hskMap={hskMap} onRefresh={onRefresh} unsaved={!openText.saved} onSave={onSaveReader} /></>}
   </section>
 }
+
+const HistoryCard = memo(function HistoryCard({ item, onOpenReader, onRemove }: { item: ReadingHistoryEntry; onOpenReader: (text: Omit<OpenText, 'origin'>) => void; onRemove: (id: string) => void }) {
+  return <article className="history-card" onClick={() => onOpenReader({ id: item.savedId ?? '', title: item.title, content: item.content, saved: Boolean(item.savedId) })}>
+    <button className="history-remove" aria-label="Remove from reading history" onClick={(event) => { event.stopPropagation(); onRemove(item.id) }}>×</button>
+    <strong>{item.title}</strong>
+    <span className="tag hsk-badge">{item.hskLevel ? `HSK ${item.hskLevel}` : 'Not in HSK'}</span>
+    <span className="muted small">{new Date(item.readAt).toLocaleDateString()} · {item.wordCount ?? 0} words</span>
+    <span className="muted small">{item.preview ?? ''}</span>
+  </article>
+})
 
 function SavedTextsPage({ texts, cards, lists, hskMap, onRefresh, openText, onOpenReader, onBack, onSaveReader, onGoToReader }: { texts: TextRecord[]; cards: VocabularyCard[]; lists: StudyList[]; hskMap: Map<string, HskLevel>; onRefresh: () => Promise<void>; openText: OpenText | null; onOpenReader: (text: Omit<OpenText, 'origin'>) => void; onBack: () => void; onSaveReader: () => Promise<void>; onGoToReader: () => void }) {
   const textStats = useMemo(() => new Map(texts.map((text) => {
@@ -386,15 +420,8 @@ interface Segment {
 }
 
 function segmentChineseText(content: string): Segment[] {
-  const Segmenter = (Intl as typeof Intl & {
-    Segmenter?: new (
-      locales?: string | string[],
-      options?: { granularity?: 'word' },
-    ) => { segment: (value: string) => Iterable<{ segment: string; isWordLike?: boolean }> }
-  }).Segmenter
-
-  if (!Segmenter) return [...content].map((text) => ({ text, isWordLike: /[\u3400-\u9fff]/u.test(text) }))
-  return [...new Segmenter('zh-Hans', { granularity: 'word' }).segment(content)].map(({ segment, isWordLike }) => ({
+  if (!segmenter) return [...content].map((text) => ({ text, isWordLike: /[\u3400-\u9fff]/u.test(text) }))
+  return [...segmenter.segment(content)].map(({ segment, isWordLike }) => ({
     text: segment,
     isWordLike: Boolean(isWordLike && /[\u3400-\u9fff]/u.test(segment)),
   }))
@@ -456,6 +483,7 @@ function TextReader({ text, cards, lists, hskMap: initialHskMap, onRefresh, unsa
   const [createCards, setCreateCards] = useState(true)
   const [busy, setBusy] = useState(false)
   const sentences = useMemo(() => splitSentences(text.content), [text.content])
+  const sentenceSegments = useMemo(() => sentences.map((sentence) => segmentChineseText(sentence)), [sentences])
   const [showTranslations, setShowTranslations] = useState(false)
   const [translations, setTranslations] = useState<Record<string, string>>(text.translations ?? {})
   const [translationStatus, setTranslationStatus] = useState<string | null>(null)
@@ -575,8 +603,8 @@ function TextReader({ text, cards, lists, hskMap: initialHskMap, onRefresh, unsa
   }
 
   const renderSentence = (sentence: string, index: number) => {
-    const segments = segmentChineseText(sentence)
-    return <div className="reader-sentence" key={`${sentence}-${index}`}><div className="reader-sentence-row"><span className="reader-sentence-text">{segments.map((segment, segmentIndex) => segment.isWordLike ? <WordToken key={`${segment.text}-${segmentIndex}`} word={segment.text} known={knownWords.has(segment.text)} studyStatus={getStudyStatus(segment.text, vocabulary, cards)} hskLevel={getHskLevelForWord(segment.text, hskMap)} hskMap={hskMap} showPinyin={showPinyin} showHskColors={showHskColors} showUnderlines={showUnderlines} highlightAbove={highlightAbove} onClick={() => selectWord(segment.text)} /> : <span key={`${segment.text}-${segmentIndex}`}>{segment.text}</span>)}</span><button className="translate-icon" aria-label={`Translate sentence ${index + 1}`} title="Translate sentence" onClick={() => void translateSentences([sentence])}>↗</button></div>{showTranslations && translations[sentence] && <p className="translation-line">{translations[sentence]}</p>}</div>
+    const segments = sentenceSegments[index]
+    return <div className="reader-sentence" key={`${sentence}-${index}`}><div className="reader-sentence-row"><span className="reader-sentence-text">{segments.map((segment, segmentIndex) => segment.isWordLike ? <WordToken key={`${segment.text}-${segmentIndex}`} word={segment.text} known={knownWords.has(segment.text)} studyStatus={getStudyStatus(segment.text, vocabulary, cards)} hskLevel={getHskLevelForWord(segment.text, hskMap)} showPinyin={showPinyin} showHskColors={showHskColors} showUnderlines={showUnderlines} highlightAbove={highlightAbove} onClick={() => selectWord(segment.text)} /> : <span key={`${segment.text}-${segmentIndex}`}>{segment.text}</span>)}</span><button className="translate-icon" aria-label={`Translate sentence ${index + 1}`} title="Translate sentence" onClick={() => void translateSentences([sentence])}>↗</button></div>{showTranslations && translations[sentence] && <p className="translation-line">{translations[sentence]}</p>}</div>
   }
 
   const statusCounts = wordList.reduce((counts, word) => { const entry = vocabulary.find((item) => (item.hanzi ?? item.front) === word); const status = entry ? getStudyStatus(word, vocabulary, cards) : undefined; if (status === 'known') counts.known += 1; else if (status) counts.studying += 1; else counts.unknown += 1; return counts }, { unknown: 0, studying: 0, known: 0 })
@@ -629,7 +657,7 @@ function getStudyStatus(word: string, vocabulary: VocabularyCard[], cards: Vocab
   return 'known'
 }
 
-function WordToken({ word, known, studyStatus, hskLevel, hskMap, showPinyin, showHskColors, showUnderlines, highlightAbove, onClick }: { word: string; known: boolean; studyStatus?: StudyStatus; hskLevel?: HskLevel; hskMap: Map<string, HskLevel>; showPinyin: boolean; showHskColors: boolean; showUnderlines: boolean; highlightAbove: number; onClick: () => void }) {
+const WordToken = memo(function WordToken({ word, known, studyStatus, hskLevel, showPinyin, showHskColors, showUnderlines, highlightAbove, onClick }: { word: string; known: boolean; studyStatus?: StudyStatus; hskLevel?: HskLevel; showPinyin: boolean; showHskColors: boolean; showUnderlines: boolean; highlightAbove: number; onClick: () => void }) {
   const [tooltip, setTooltip] = useState<DictionaryLookup | null>(null)
   const [hovering, setHovering] = useState(false)
   const timer = useRef<number | undefined>(undefined)
@@ -655,8 +683,8 @@ function WordToken({ word, known, studyStatus, hskLevel, hskMap, showPinyin, sho
     setHovering(false)
   }
   let characterIndex = 0
-  return <span className="reader-token" onMouseEnter={startTooltip} onMouseLeave={stopTooltip}><button className={className} onClick={onClick}><ruby>{[...word].map((character) => { const color = showHskColors && hskLevel && hskRank(hskLevel) > highlightAbove ? HSK_COLORS[hskLevel] : undefined; characterIndex += 1; return <span className="reader-character" style={{ color }} key={`${character}-${characterIndex}`}>{character}</span> })}{showPinyin && <rt>{getPinyin(word)}</rt>}</ruby></button>{hovering && tooltip && <span className="word-tooltip" role="tooltip"><strong>{word}</strong><span className="tooltip-pinyin">{tooltip.pinyin}</span><small className="hsk-badge">{hskLevel ? `HSK${hskLevel}` : 'Not in HSK'}</small><span>{tooltip.definitions.slice(0, 3).join('; ') || 'No definition'}</span></span>}</span>
-}
+  return <span className="reader-token" onMouseEnter={startTooltip} onMouseLeave={stopTooltip}><button className={className} onClick={onClick}><ruby>{[...word].map((character) => { const color = showHskColors && hskLevel && hskRank(hskLevel) > highlightAbove ? HSK_COLORS[hskLevel] : undefined; characterIndex += 1; return <span className="reader-character" style={{ color }} key={`${character}-${characterIndex}`}>{character}</span> })}{showPinyin && <rt>{getCachedPinyin(word)}</rt>}</ruby></button>{hovering && tooltip && <span className="word-tooltip" role="tooltip"><strong>{word}</strong><span className="tooltip-pinyin">{tooltip.pinyin}</span><small className="hsk-badge">{hskLevel ? `HSK${hskLevel}` : 'Not in HSK'}</small><span>{tooltip.definitions.slice(0, 3).join('; ') || 'No definition'}</span></span>}</span>
+})
 
 function ReaderLegend({ showHskColors, showUnderlines }: { showHskColors: boolean; showUnderlines: boolean }) {
   return <div className="reader-legend" aria-label="Reading legend">
