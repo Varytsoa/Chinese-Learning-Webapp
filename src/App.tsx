@@ -40,7 +40,7 @@ const emptyCard = (textId: string): VocabularyCard => ({
 async function runBackgroundBackfill(): Promise<void> {
   if (localStorage.getItem('hanzi-study-card-data-backfill-v1') === 'done') return
   const cards = await storage.getCards()
-  const vocabulary = cards.filter((card) => !card.vocabularyEntryId)
+  const vocabulary = useMemo(() => cards.filter((card) => !card.vocabularyEntryId), [cards])
   for (let start = 0; start < vocabulary.length; start += 50) {
     for (const entry of vocabulary.slice(start, start + 50)) {
       const linked = cards.find((card) => card.vocabularyEntryId === entry.id)
@@ -358,7 +358,7 @@ function ReaderPage({ texts, cards, lists, hskMap, onRefresh, openText, history,
     localStorage.setItem('hanzi-study-history', JSON.stringify(next))
   }
   useEffect(() => {
-    const missing = history.filter((item) => item.hskLevel === undefined || item.wordCount === undefined || item.preview === undefined)
+    const missing = history.filter((item) => item.wordCount === undefined || item.preview === undefined)
     if (!missing.length) return
     let cancelled = false
     const process = () => {
@@ -369,8 +369,10 @@ function ReaderPage({ texts, cards, lists, hskMap, onRefresh, openText, history,
         return [item.id, { ...item, hskLevel: item.hskLevel ?? stats.hskLevel, wordCount: item.wordCount ?? stats.wordCount, preview: item.preview ?? item.content.split(/\r?\n/)[0] ?? '' }]
       }))
       const next = history.map((item) => updates.get(item.id) ?? item)
-      onSetHistory(next)
-      localStorage.setItem('hanzi-study-history', JSON.stringify(next))
+      if (next.some((item, index) => item.wordCount !== history[index].wordCount || item.preview !== history[index].preview)) {
+        onSetHistory(next)
+        localStorage.setItem('hanzi-study-history', JSON.stringify(next))
+      }
     }
     const idle = window.setTimeout(process, 0)
     return () => { cancelled = true; window.clearTimeout(idle) }
@@ -488,7 +490,7 @@ function TextReader({ text, cards, lists, hskMap: initialHskMap, onRefresh, unsa
   const [translations, setTranslations] = useState<Record<string, string>>(text.translations ?? {})
   const [translationStatus, setTranslationStatus] = useState<string | null>(null)
   const [translating, setTranslating] = useState(false)
-  const vocabulary = cards.filter((card) => card.textId === text.id && !card.vocabularyEntryId)
+  const vocabulary = useMemo(() => cards.filter((card) => card.textId === text.id && !card.vocabularyEntryId), [cards, text.id])
   const knownWords = useMemo(() => new Set(vocabulary.map((card) => (card.hanzi ?? card.front).trim())), [vocabulary])
   const wordList = useMemo(() => [...new Set(sentences.flatMap((sentence) => segmentChineseText(sentence)).filter((segment) => segment.isWordLike).map((segment) => segment.text))], [sentences])
   const [visibleSentenceCount, setVisibleSentenceCount] = useState(sentences.length)
