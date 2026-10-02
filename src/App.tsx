@@ -491,6 +491,30 @@ function TextReader({ text, cards, lists, hskMap: initialHskMap, onRefresh, unsa
   const vocabulary = cards.filter((card) => card.textId === text.id && !card.vocabularyEntryId)
   const knownWords = useMemo(() => new Set(vocabulary.map((card) => (card.hanzi ?? card.front).trim())), [vocabulary])
   const wordList = useMemo(() => [...new Set(sentences.flatMap((sentence) => segmentChineseText(sentence)).filter((segment) => segment.isWordLike).map((segment) => segment.text))], [sentences])
+  const [visibleSentenceCount, setVisibleSentenceCount] = useState(sentences.length)
+  useEffect(() => {
+    let frame = 0
+    let cancelled = false
+    if (wordList.length <= 1500) {
+      setVisibleSentenceCount(sentences.length)
+      return () => undefined
+    }
+    let sentenceIndex = 0
+    let wordsShown = 0
+    const nextChunk = () => {
+      if (cancelled) return
+      const start = sentenceIndex
+      while (sentenceIndex < sentences.length && (sentenceIndex === start || wordsShown < 300)) {
+        wordsShown += sentenceSegments[sentenceIndex].filter((segment) => segment.isWordLike).length
+        sentenceIndex += 1
+      }
+      setVisibleSentenceCount(sentenceIndex)
+      if (sentenceIndex < sentences.length) frame = window.requestAnimationFrame(nextChunk)
+    }
+    setVisibleSentenceCount(0)
+    frame = window.requestAnimationFrame(nextChunk)
+    return () => { cancelled = true; window.cancelAnimationFrame(frame) }
+  }, [sentences, sentenceSegments, wordList.length])
   const selectedAnalysis = useMemo(() => selectedWord ? analyzeHskWord(selectedWord, hskMap) : null, [selectedWord, hskMap])
   const groupedEntries = useMemo(() => {
     if (!lookup) return []
@@ -621,7 +645,7 @@ function TextReader({ text, cards, lists, hskMap: initialHskMap, onRefresh, unsa
         <button className="quiet" disabled={translating} onClick={translateAll}>{translating ? 'Translating…' : 'Translate'}</button>
       </div>
       {translationStatus && <p className="translation-status">{translationStatus}</p>}
-      <div className={`reader-text font-${fontSize}`}>{sentences.map(renderSentence)}</div>
+      <div className={`reader-text font-${fontSize}`}>{sentences.slice(0, visibleSentenceCount).map(renderSentence)}</div>
       <ReaderLegend showHskColors={showHskColors} showUnderlines={showUnderlines} />
       <p className="muted small">{vocabulary.length} vocabulary item{vocabulary.length === 1 ? '' : 's'} in Study List from this text</p>
     </div>
