@@ -5,6 +5,8 @@ export interface TextRecord {
   title: string
   content: string
   createdAt: number
+  hskLevel?: number | '7-9'
+  wordCount?: number
   translations?: Record<string, string>
 }
 

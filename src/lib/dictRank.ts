@@ -1,5 +1,6 @@
 import { pinyin } from 'pinyin-pro'
 import type { DictionaryEntry } from 'cc-cedict'
+import { getHskPinyinMap } from './hsk'
 
 type Cedict = {
   getBySimplified: (
@@ -26,48 +27,11 @@ export function isDeferredSense(sense: string): boolean {
 }
 
 let dictionaryPromise: Promise<Cedict> | undefined
-let hskPinyinPromise: Promise<Map<string, string>> | undefined
+const rankedEntriesCache = new Map<string, DictionaryEntry[]>()
 
 function loadDictionary(): Promise<Cedict> {
   dictionaryPromise ??= import('cc-cedict').then(({ default: dictionary }) => dictionary as unknown as Cedict)
   return dictionaryPromise
-}
-
-async function loadHskPinyin(): Promise<Map<string, string>> {
-  const module = await import('../data/hsk30-expanded.csv?raw')
-  const lines = module.default.split(/\r?\n/).filter(Boolean)
-  const map = new Map<string, string>()
-  for (const line of lines.slice(1)) {
-    const fields = parseCsvLine(line)
-    const word = fields[1]?.trim()
-    const wordPinyin = fields[3]?.trim()
-    if (word && wordPinyin && !map.has(word)) map.set(word, wordPinyin)
-  }
-  return map
-}
-
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = []
-  let field = ''
-  let quoted = false
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index]
-    if (character === '"') {
-      if (quoted && line[index + 1] === '"') {
-        field += '"'
-        index += 1
-      } else {
-        quoted = !quoted
-      }
-    } else if (character === ',' && !quoted) {
-      fields.push(field)
-      field = ''
-    } else {
-      field += character
-    }
-  }
-  fields.push(field)
-  return fields
 }
 
 function normalizePinyin(value: string): string {
@@ -119,9 +83,14 @@ function flatten(result: Record<string, DictionaryEntry[]> | null): DictionaryEn
 }
 
 export async function getRankedEntries(word: string, contextPinyin?: string): Promise<DictionaryEntry[]> {
-  const [dictionary, hskPinyin] = await Promise.all([loadDictionary(), hskPinyinPromise ??= loadHskPinyin()])
+  const cacheKey = `${word}\u0000${contextPinyin ?? ''}`
+  const cached = rankedEntriesCache.get(cacheKey)
+  if (cached) return cached
+  const [dictionary, hskPinyin] = await Promise.all([loadDictionary(), getHskPinyinMap()])
   const entries = flatten(dictionary.getBySimplified(word, null, { asObject: true, allowVariants: true }))
-  return rankEntries(entries, hskPinyin.get(word), contextPinyin)
+  const ranked = rankEntries(entries, hskPinyin.get(word), contextPinyin)
+  rankedEntriesCache.set(cacheKey, ranked)
+  return ranked
 }
 
 export async function getPrimarySenses(word: string, contextPinyin?: string): Promise<string[]> {

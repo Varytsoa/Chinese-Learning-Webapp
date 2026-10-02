@@ -10,11 +10,21 @@ export interface DictionaryLookup {
   found: boolean
 }
 
+const lookupCache = new Map<string, Promise<DictionaryLookup>>()
+
 function pinyinFor(word: string): string {
   return pinyin(word, { toneType: 'symbol', type: 'string' })
 }
 
 export async function lookupWord(word: string): Promise<DictionaryLookup> {
+  const cached = lookupCache.get(word)
+  if (cached) return cached
+  const request = lookupWordUncached(word)
+  lookupCache.set(word, request)
+  return request
+}
+
+async function lookupWordUncached(word: string): Promise<DictionaryLookup> {
   const fullEntries = await getRankedEntries(word, pinyinFor(word))
   const definitions = fullEntries.length
     ? (await getPrimarySenses(word, pinyinFor(word))).slice(0, 8)

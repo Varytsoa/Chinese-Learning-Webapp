@@ -19,7 +19,7 @@ export const HSK_COLORS: Record<HskLevel, string> = {
   '7-9': '#E85A5A',
 }
 
-let hskPromise: Promise<Map<string, HskLevel>> | undefined
+let hskDataPromise: Promise<{ levels: Map<string, HskLevel>; pinyin: Map<string, string> }> | undefined
 
 function parseCsvLine(line: string): string[] {
   const fields: string[] = []
@@ -52,25 +52,33 @@ function parseLevel(value: string): HskLevel | undefined {
   return Number.isInteger(level) && level >= 1 && level <= 6 ? level : undefined
 }
 
-async function loadHskMap(): Promise<Map<string, HskLevel>> {
+async function loadHskData(): Promise<{ levels: Map<string, HskLevel>; pinyin: Map<string, string> }> {
   const module = await import('../data/hsk30-expanded.csv?raw')
   const lines = module.default.split(/\r?\n/).filter(Boolean)
   const rows = lines.slice(1).map(parseCsvLine)
   const hasNewRows = rows.some((row) => row[0]?.startsWith('new-'))
-  const map = new Map<string, HskLevel>()
+  const levels = new Map<string, HskLevel>()
+  const pinyin = new Map<string, string>()
 
   for (const row of rows) {
     if (hasNewRows && !row[0]?.startsWith('new-')) continue
     const word = row[1]?.trim()
     const level = parseLevel(row[5] ?? '')
-    if (word && level !== undefined && !map.has(word)) map.set(word, level)
+    const wordPinyin = row[3]?.trim()
+    if (word && level !== undefined && !levels.has(word)) levels.set(word, level)
+    if (word && wordPinyin && !pinyin.has(word)) pinyin.set(word, wordPinyin)
   }
-  return map
+  return { levels, pinyin }
 }
 
 export function getHskMap(): Promise<Map<string, HskLevel>> {
-  hskPromise ??= loadHskMap()
-  return hskPromise
+  hskDataPromise ??= loadHskData()
+  return hskDataPromise.then((data) => data.levels)
+}
+
+export function getHskPinyinMap(): Promise<Map<string, string>> {
+  hskDataPromise ??= loadHskData()
+  return hskDataPromise.then((data) => data.pinyin)
 }
 
 export function hskRank(level: HskLevel | undefined): number {
