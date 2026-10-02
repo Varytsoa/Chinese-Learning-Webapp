@@ -82,6 +82,7 @@ export function App() {
   }
   const openReader = (next: Omit<OpenText, 'origin'> | null, origin: OpenText['origin']) => {
     if (!next) { setOpenText(null); return }
+    setSection(origin)
     setOpenText({ ...next, origin })
     const entry: ReadingHistoryEntry = { id: next.id || makeId(), title: next.title || 'Untitled text', content: next.content, readAt: Date.now(), savedId: next.saved ? next.id : undefined }
     const nextHistory = [entry, ...history.filter((item) => item.id !== entry.id)].slice(0, 30)
