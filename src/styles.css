@@ -257,12 +257,13 @@ html[data-theme="dark"] .word-tooltip::after { border-top-color: #0e110f; }
 @media (min-width: 1024px) { .dashboard-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 1600px) { .dashboard-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 700px) {
-  .sidebar { bottom: 0; flex-direction: row; min-height: auto; padding: 7px; width: 100%; z-index: 10; }
+  .app-shell { flex-direction: column; }
+  .sidebar { bottom: 0; flex-direction: row; left: 0; min-height: auto; padding: 7px; position: fixed; right: 0; width: 100%; z-index: 10; }
   .sidebar-brand, .theme-toggle span { display: none; }
   .sidebar-nav { display: flex; flex: 1; gap: 3px; justify-content: space-around; }
   .sidebar-nav .nav-button { font-size: .72rem; padding: 9px 5px; text-align: center; }
   .theme-toggle { border: 0; margin: 0; padding: 9px; }
-  .content { padding: 24px 18px 90px; }
+  .content { flex: 1 1 auto; padding: 24px 18px 90px; width: 100%; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .dashboard-panel { padding: 18px; }
   .mini-card-grid, .toughest-grid { grid-template-columns: repeat(2, 1fr); }
