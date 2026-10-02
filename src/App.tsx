@@ -116,7 +116,7 @@ export function App() {
         {page === 'dashboard' && <DashboardPage texts={texts} cards={cards} reviewLogs={reviewLogs} dueCount={dueCards.length} onNavigate={navigate} />}
         {(page === 'texts' || page === 'saved') && <TextsPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} reader={reader} history={history} onOpenReader={openReader} onSaveReader={saveReaderText} onSetHistory={setHistory} />}
         {page === 'study' && <StudyPage texts={texts} cards={cards} lists={lists} onRefresh={refresh} onReviewNow={() => navigate('review')} />}
-        {page === 'review' && <ReviewPage cards={dueCards} lists={lists} texts={texts} onRefresh={refresh} cardDirection={cardDirection} />}
+        {page === 'review' && <ReviewPage cards={dueCards} allCards={cards} lists={lists} texts={texts} onRefresh={refresh} cardDirection={cardDirection} />}
         {page === 'settings' && <SettingsPage onRefresh={refresh} theme={theme} onThemeChange={setTheme} cardDirection={cardDirection} onCardDirectionChange={(direction) => { setCardDirection(direction); localStorage.setItem('hanzi-study-card-direction', direction) }} />}
       </main>
     </div>
@@ -671,7 +671,7 @@ function VocabularyRow({ card, lists, texts, generatedCardCount, editing, onEdit
 
 type ReviewFilter = 'all' | 'list' | 'source'
 
-function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: VocabularyCard[]; lists: StudyList[]; texts: TextRecord[]; onRefresh: () => Promise<void>; cardDirection: CardDirection }) {
+function ReviewPage({ cards, allCards, lists, texts, onRefresh, cardDirection }: { cards: VocabularyCard[]; allCards: VocabularyCard[]; lists: StudyList[]; texts: TextRecord[]; onRefresh: () => Promise<void>; cardDirection: CardDirection }) {
   const [filter, setFilter] = useState<ReviewFilter>('all')
   const [selectedListId, setSelectedListId] = useState('')
   const [selectedSourceId, setSelectedSourceId] = useState('')
@@ -693,7 +693,7 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
     let active = true
     setResolvedData(null)
     if (!card) return () => { active = false }
-    const entry = card.vocabularyEntryId ? cards.find((item) => item.id === card.vocabularyEntryId) : card
+    const entry = card.vocabularyEntryId ? allCards.find((item) => item.id === card.vocabularyEntryId) : card
     if (!entry) return () => { active = false }
     setResolvingData(true)
     void resolveCardData(entry, card).then((data) => {
@@ -702,7 +702,7 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
       if (active) setResolvingData(false)
     })
     return () => { active = false }
-  }, [card, cards])
+  }, [card, allCards])
   const filterControls = <div className="review-filters panel"><label htmlFor="review-filter">Review</label><select id="review-filter" value={filter} onChange={(event) => setFilter(event.target.value as ReviewFilter)}><option value="all">All due cards ({cards.length})</option><option value="list">From custom list</option><option value="source">From saved text</option></select>{filter === 'list' && <select value={selectedListId} onChange={(event) => setSelectedListId(event.target.value)} aria-label="Review custom list"><option value="">Choose a custom list</option>{lists.map((list) => <option value={list.id} key={list.id}>{list.name}</option>)}</select>}{filter === 'source' && <select value={selectedSourceId} onChange={(event) => setSelectedSourceId(event.target.value)} aria-label="Review saved text"><option value="">Choose a saved text</option>{texts.map((text) => <option value={text.id} key={text.id}>{text.title}</option>)}</select>}</div>
   if (!card) return <section className="review-page"><SectionHeading title="Review" description="Practice cards when they are due." />{filterControls}<EmptyState text={filteredCards.length || cards.length ? 'You finished this review session or this filter has no due cards.' : 'You are all caught up. Add cards or come back later.'} /></section>
   const rate = async (rating: ReviewRating) => {
@@ -713,7 +713,7 @@ function ReviewPage({ cards, lists, texts, onRefresh, cardDirection }: { cards: 
     setRevealed(false)
     await onRefresh()
   }
-  const entry = card.vocabularyEntryId ? cards.find((item) => item.id === card.vocabularyEntryId) : card
+  const entry = card.vocabularyEntryId ? allCards.find((item) => item.id === card.vocabularyEntryId) : card
   const hanzi = entry?.hanzi ?? (card.cardType === 'recognition' ? card.front : '')
   const pinyin = resolvedData?.pinyin ?? ''
   const meanings = resolvedData?.meaning && resolvedData.meaning !== 'No meaning available' ? [resolvedData.meaning] : []
