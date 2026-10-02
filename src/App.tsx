@@ -136,10 +136,11 @@ function wordStatus(entry: VocabularyCard, cards: VocabularyCard[]): 'known' | '
 
 function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { texts: TextRecord[]; cards: VocabularyCard[]; reviewLogs: ReviewLog[]; dueCount: number; onNavigate: (page: Page) => void }) {
   const [hskMap, setHskMap] = useState<Map<string, HskLevel>>(new Map())
+  const [recentCardData, setRecentCardData] = useState<Record<string, Awaited<ReturnType<typeof resolveCardData>>>>({})
   const vocabulary = cards.filter((card) => !card.vocabularyEntryId)
   const today = dayKey(Date.now())
   const reviewedToday = reviewLogs.filter((log) => dayKey(log.reviewedAt) === today)
-  const recentWords = [...vocabulary].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6)
+  const recentWords = useMemo(() => [...vocabulary].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6), [vocabulary])
   const streak = (() => {
     const days = new Set(reviewLogs.map((log) => dayKey(log.reviewedAt)))
     let cursor = new Date()
@@ -148,6 +149,13 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
     return count
   })()
   useEffect(() => { getHskMap().then(setHskMap) }, [])
+  useEffect(() => {
+    let active = true
+    void Promise.all(recentWords.map(async (entry) => [entry.id, await resolveCardData(entry)] as const)).then((results) => {
+      if (active) setRecentCardData(Object.fromEntries(results))
+    })
+    return () => { active = false }
+  }, [recentWords])
   const hskRows = ([1, 2, 3, 4, 5, 6, '7-9'] as HskLevel[]).map((level) => {
     const total = [...hskMap.values()].filter((item) => item === level).length
     const entries = vocabulary.filter((entry) => getHskLevelForWord(entry.hanzi ?? entry.front, hskMap) === level)
@@ -187,7 +195,7 @@ function DashboardPage({ texts, cards, reviewLogs, dueCount, onNavigate }: { tex
       <div className="dashboard-main">
         <article className="dashboard-panel due-panel"><p className="dashboard-title">DUE FOR REVIEW</p><strong className="due-number">{dueCount}</strong><span className="muted">cards waiting</span><button className="primary" onClick={() => onNavigate('review')}>Flashcards</button></article>
         <div className="stat-tiles"><div className="dashboard-panel stat-tile"><strong>{streak}</strong><span className="muted">day streak</span></div><div className="dashboard-panel stat-tile"><strong>{reviewedToday.length}</strong><span className="muted">reviewed today</span></div><div className="dashboard-panel stat-tile"><strong>{reviewedToday.filter((log) => log.rating === 'good' || log.rating === 'easy').length}</strong><span className="muted">promoted today</span></div></div>
-        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY ADDED TO STUDY LIST</p><button className="link-button" onClick={() => onNavigate('study')}>View all →</button></div>{recentWords.length ? <div className="mini-card-grid">{recentWords.map((entry) => { const word = entry.hanzi ?? entry.front; const level = getHskLevelForWord(word, hskMap); return <div className="mini-word-card" key={entry.id}><strong style={{ color: level ? HSK_COLORS[level] : undefined }}>{word}</strong><span className="tag">{hskBadge(word)}</span><span className="word-pinyin">{entry.pinyin}</span><span className="muted small">{entry.meaning ?? entry.back}</span></div> })}</div> : empty('No vocabulary added yet.', 'texts')}</article>
+        <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY ADDED TO STUDY LIST</p><button className="link-button" onClick={() => onNavigate('study')}>View all →</button></div>{recentWords.length ? <div className="mini-card-grid">{recentWords.map((entry) => { const word = entry.hanzi ?? entry.front; const data = recentCardData[entry.id]; const level = data?.hskLevel ?? getHskLevelForWord(word, hskMap); return <div className="mini-word-card" key={entry.id}><strong style={{ color: level ? HSK_COLORS[level] : undefined }}>{word}</strong><span className="tag recent-hsk-badge">{level ? `HSK ${level}` : 'Not in HSK'}</span><span className="word-pinyin">{data?.pinyin ?? entry.pinyin ?? ''}</span><span className="muted small recent-meaning">{data?.meaning ?? 'No meaning available'}</span></div> })}</div> : empty('No vocabulary added yet.', 'texts')}</article>
         <article className="dashboard-panel"><div className="dashboard-panel-heading"><p className="dashboard-title">RECENTLY SAVED TEXTS</p><button className="link-button" onClick={() => onNavigate('texts')}>View all →</button></div>{texts.length ? <div className="saved-text-list">{texts.slice(0, 3).map((text) => <div className="saved-text-row" key={text.id}><strong>{text.title}</strong><span className="muted small">{new Date(text.createdAt).toLocaleDateString()}</span><span className="tag">{hardestTextLevel(text.content) ? `HSK ${hardestTextLevel(text.content)}` : 'Not in HSK'}</span></div>)}</div> : empty('Save a text to see it here.', 'texts')}</article>
       </div>
       <div className="dashboard-side">
