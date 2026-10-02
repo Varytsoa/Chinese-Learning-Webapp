@@ -40,7 +40,7 @@ const emptyCard = (textId: string): VocabularyCard => ({
 async function runBackgroundBackfill(): Promise<void> {
   if (localStorage.getItem('hanzi-study-card-data-backfill-v1') === 'done') return
   const cards = await storage.getCards()
-  const vocabulary = useMemo(() => cards.filter((card) => !card.vocabularyEntryId), [cards])
+  const vocabulary = cards.filter((card) => !card.vocabularyEntryId)
   for (let start = 0; start < vocabulary.length; start += 50) {
     for (const entry of vocabulary.slice(start, start + 50)) {
       const linked = cards.find((card) => card.vocabularyEntryId === entry.id)
@@ -177,7 +177,7 @@ function wordStatus(entry: VocabularyCard, cards: VocabularyCard[]): 'known' | '
 
 function DashboardPage({ texts, cards, reviewLogs, dueCount, hskMap, onNavigate, onOpenSavedText }: { texts: TextRecord[]; cards: VocabularyCard[]; reviewLogs: ReviewLog[]; dueCount: number; hskMap: Map<string, HskLevel>; onNavigate: (section: Section) => void; onOpenSavedText: (text: TextRecord) => void }) {
   const [recentCardData, setRecentCardData] = useState<Record<string, Awaited<ReturnType<typeof resolveCardData>>>>({})
-  const vocabulary = cards.filter((card) => !card.vocabularyEntryId)
+  const vocabulary = useMemo(() => cards.filter((card) => !card.vocabularyEntryId), [cards])
   const today = dayKey(Date.now())
   const reviewedToday = reviewLogs.filter((log) => dayKey(log.reviewedAt) === today)
   const recentWords = useMemo(() => [...vocabulary].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6), [vocabulary])
